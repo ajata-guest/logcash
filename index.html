@@ -447,9 +447,10 @@
     }
 
     .opt-resolve,
-    .opt-export {
+    .opt-export,
+    .opt-rename {
       flex-shrink: 0;
-      width: 38px;
+      width: 36px;
       background: none;
       border: none;
       border-radius: 8px;
@@ -458,14 +459,16 @@
       cursor: pointer;
     }
 
-    .opt-export {
+    .opt-export,
+    .opt-rename {
       display: flex;
       align-items: center;
       justify-content: center;
     }
 
     .opt-resolve:hover,
-    .opt-export:hover {
+    .opt-export:hover,
+    .opt-rename:hover {
       background: var(--surface-2);
       color: var(--text);
     }
@@ -590,6 +593,49 @@
       text-align: center;
     }
 
+    .batch-loading {
+      width: 100%;
+      padding: 12px 16px;
+      font-size: 14px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+
+    .batch-loading[hidden] {
+      display: none;
+    }
+
+    /* Inline rename, same footprint as the resolve confirmation. */
+    .batch-edit {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--surface-2);
+    }
+
+    .edit-label {
+      display: block;
+      margin-bottom: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+      text-align: left;
+    }
+
+    .edit-input {
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 15px;
+    }
+
+    .edit-input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
     .banner {
       width: 100%;
       padding: 12px 14px;
@@ -659,6 +705,11 @@
 
       <p class="panel-error" id="panel-error" role="alert" hidden></p>
 
+      <label class="field" id="name-field" for="name-input" hidden>
+        <span class="field-label">Batch name</span>
+        <input type="text" id="name-input" placeholder="Batch name" maxlength="60">
+      </label>
+
       <label class="field" for="date-input">
         <span class="field-label">Date</span>
         <input type="date" id="date-input">
@@ -704,6 +755,10 @@
         <button type="button" id="new-batch-btn" class="ghost-btn">+ Start new cash batch</button>
       </div>
 
+      <!-- Shown only while the first server reply is still in flight, so a fresh
+           launch does not flash the empty-state button before data arrives. -->
+      <div class="batch-loading" id="batch-loading" hidden>Loading…</div>
+
       <ul class="batch-list" id="batch-list" aria-label="Cash batches" hidden></ul>
 
     </div>
@@ -743,6 +798,8 @@
       amount: document.getElementById('amt-input'),
       descriptionField: document.getElementById('description-field'),
       description: document.getElementById('description-input'),
+      nameField: document.getElementById('name-field'),
+      name: document.getElementById('name-input'),
       panelSub: document.getElementById('panel-sub'),
       cancel: document.getElementById('cancel-btn'),
       save: document.getElementById('save-btn'),
@@ -753,6 +810,7 @@
       batchLeft: document.getElementById('batch-left'),
       batchAdd: document.getElementById('batch-add'),
       batchEmpty: document.getElementById('batch-empty'),
+      batchLoading: document.getElementById('batch-loading'),
       batchList: document.getElementById('batch-list'),
       batchZone: document.getElementById('batch-zone')
     };
@@ -779,7 +837,12 @@
 
     let showResolved = false;
     let confirmingId = null;
+    let editingId = null;
     let retentionDays = 15;
+
+    // Stays false until the first server reply (or a definite "cannot fetch"),
+    // so a fresh launch shows "Loading…" rather than flashing the empty state.
+    let hasLoadedBatches = false;
 
     // ===================================================================
     // DATES  (all local — toISOString() is UTC and rolls back the date
@@ -1173,6 +1236,7 @@
 
       els.panelTitle.textContent = type === 'batch' ? 'New cash batch' : 'Confirm entry';
       els.descriptionField.hidden = (type === 'batch');
+      els.nameField.hidden = (type !== 'batch');
 
       // Entries can be redirected to any batch now, so never let someone save
       // without seeing which one the money leaves.
@@ -1188,6 +1252,7 @@
       els.date.value = values.date || toLocalISODate(startOfToday());
       els.amount.value = values.amount || '';
       els.description.value = values.description || '';
+      els.name.value = values.name || '';
 
       clearPanelError();
       els.panel.hidden = false;
@@ -1228,7 +1293,9 @@
       // Replaces the old prompt(): same panel, so a batch can be backdated and
       // is never submitted from fields the user cannot see.
       closeBatchList();
-      openPanel('batch', { date: toLocalISODate(startOfToday()), amount: '', description: '' });
+      const today = toLocalISODate(startOfToday());
+      // Pre-fill the auto name so a batch always has one; the user can overwrite.
+      openPanel('batch', { date: today, amount: '', description: '', name: defaultBatchName(today) });
       els.amount.focus();
     }
 
@@ -1273,6 +1340,9 @@
       };
 
       if (pendingType === 'batch') {
+        // A blank name falls back to the date-based default so a batch is never
+        // nameless. The server applies the same fallback.
+        entry.name = els.name.value.trim() || defaultBatchName(entry.date);
         // Log into the batch just created rather than whatever was selected before.
         writeValue(SELECTED_KEY, entry.id);
       } else {
@@ -1485,7 +1555,7 @@
           }
           const batch = {
             id: entry.id,
-            name: defaultBatchName(entry.date),
+            name: entry.name || defaultBatchName(entry.date),
             opening: entry.amount,
             spent: 0,
             balance: entry.amount,
@@ -1511,6 +1581,9 @@
 
         } else if (entry.type === 'unresolve') {
           batch.resolvedOn = '';
+
+        } else if (entry.type === 'rename') {
+          batch.name = entry.name;
 
         } else {
           batch.spent = round2(batch.spent + entry.amount);
@@ -1634,6 +1707,22 @@
       return button;
     }
 
+    function renameButton(batch) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'opt-rename';
+      button.dataset.act = 'ask-rename';
+      button.dataset.id = batch.id;
+      button.title = 'Rename batch';
+      button.setAttribute('aria-label', 'Rename ' + batch.name);
+      button.innerHTML =
+        '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" ' +
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M12 20h9"></path>' +
+        '<path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"></path></svg>';
+      return button;
+    }
+
     function batchRow(batch) {
       const row = document.createElement('li');
       row.className = 'batch-row';
@@ -1658,8 +1747,50 @@
       resolve.setAttribute('aria-label', 'Mark ' + batch.name + ' as resolved');
 
       row.appendChild(option);
+      row.appendChild(renameButton(batch));
       row.appendChild(exportButton(batch));
       row.appendChild(resolve);
+      return row;
+    }
+
+    function editRow(batch) {
+      const row = document.createElement('li');
+      row.className = 'batch-edit';
+
+      const label = document.createElement('label');
+      label.className = 'edit-label';
+      label.setAttribute('for', 'rename-input');
+      label.textContent = 'Rename batch';
+
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.id = 'rename-input';
+      input.className = 'edit-input';
+      input.maxLength = 60;
+      input.value = batch.name;
+      input.dataset.role = 'rename-input';
+
+      const buttons = document.createElement('span');
+      buttons.className = 'confirm-row';
+
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'confirm-no';
+      no.dataset.act = 'cancel-rename';
+      no.textContent = 'Cancel';
+
+      const yes = document.createElement('button');
+      yes.type = 'button';
+      yes.className = 'confirm-yes';
+      yes.dataset.act = 'do-rename';
+      yes.dataset.id = batch.id;
+      yes.textContent = 'Save';
+
+      buttons.appendChild(no);
+      buttons.appendChild(yes);
+      row.appendChild(label);
+      row.appendChild(input);
+      row.appendChild(buttons);
       return row;
     }
 
@@ -1748,9 +1879,15 @@
       }
 
       visibleBatches.forEach(function (batch) {
-        els.batchList.appendChild(
-          confirmingId === batch.id ? confirmRow(batch) : batchRow(batch)
-        );
+        let node;
+        if (editingId === batch.id) {
+          node = editRow(batch);
+        } else if (confirmingId === batch.id) {
+          node = confirmRow(batch);
+        } else {
+          node = batchRow(batch);
+        }
+        els.batchList.appendChild(node);
       });
 
       // Resolved batches stay out of the list proper, but remain recoverable
@@ -1776,12 +1913,21 @@
       if (batches.length) {
         els.batchBar.hidden = false;
         els.batchEmpty.hidden = true;
+        els.batchLoading.hidden = true;
         els.batchCurrent.classList.toggle('is-idle', !activeBatch);
         els.batchName.textContent = activeBatch ? activeBatch.name : 'No active batch';
         els.batchLeft.textContent = activeBatch ? rupees.format(activeBatch.balance) + ' left' : '';
+      } else if (!hasLoadedBatches && isConfigured() && navigator.onLine) {
+        // First reply still in flight: withhold the empty-state button until we
+        // actually know the sheet is empty, rather than guess from a cold cache.
+        els.batchBar.hidden = true;
+        els.batchEmpty.hidden = true;
+        els.batchLoading.hidden = false;
+        closeBatchList();
       } else {
         els.batchBar.hidden = true;
         els.batchEmpty.hidden = false;
+        els.batchLoading.hidden = true;
         closeBatchList();
       }
 
@@ -1823,6 +1969,7 @@
 
     function openBatchList() {
       confirmingId = null;
+      editingId = null;
       renderBatchList();
       els.batchList.hidden = false;
       els.batchCurrent.setAttribute('aria-expanded', 'true');
@@ -1830,6 +1977,7 @@
 
     function closeBatchList() {
       confirmingId = null;
+      editingId = null;
       showResolved = false;
       els.batchList.hidden = true;
       els.batchCurrent.setAttribute('aria-expanded', 'false');
@@ -1895,6 +2043,35 @@
       });
 
       setStatus(batch.name + ' reopened.', 'success');
+    }
+
+    function renameBatch(id, rawName) {
+      const batch = findBatch(id);
+      if (!batch) {
+        return;
+      }
+
+      const name = String(rawName || '').trim();
+      if (!name) {
+        setStatus('A batch name cannot be empty.', 'error');
+        return;
+      }
+      if (name === batch.name) {
+        editingId = null;
+        renderBatchList();
+        return;
+      }
+
+      editingId = null;
+      enqueue({
+        id: newId(),
+        type: 'rename',
+        batchId: id,
+        name: name,
+        date: toLocalISODate(startOfToday())
+      });
+
+      setStatus('Renamed to ' + name + '.', 'success');
     }
 
     // ---------- export one batch as .xlsx ----------
@@ -2013,15 +2190,16 @@
       return letter;
     }
 
-    function cellXml(ref, value) {
+    function cellXml(ref, value, styleIndex) {
+      const style = styleIndex ? ' s="' + styleIndex + '"' : '';
       if (typeof value === 'number' && isFinite(value)) {
-        return '<c r="' + ref + '"><v>' + value + '</v></c>';
+        return '<c r="' + ref + '"' + style + '><v>' + value + '</v></c>';
       }
       const text = (value == null) ? '' : String(value);
       if (text === '') {
-        return '<c r="' + ref + '"/>';
+        return '<c r="' + ref + '"' + style + '/>';
       }
-      return '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' +
+      return '<c r="' + ref + '"' + style + ' t="inlineStr"><is><t xml:space="preserve">' +
         xmlEscape(text) + '</t></is></c>';
     }
 
@@ -2030,9 +2208,11 @@
       let body = '';
       for (let r = 0; r < grid.length; r++) {
         const cells = grid[r];
+        // Style 1 (the bold font defined in styles.xml) on the header row only.
+        const style = r === 0 ? 1 : 0;
         body += '<row r="' + (r + 1) + '">';
         for (let c = 0; c < cells.length; c++) {
-          body += cellXml(columnLetter(c) + (r + 1), cells[c]);
+          body += cellXml(columnLetter(c) + (r + 1), cells[c], style);
         }
         body += '</row>';
       }
@@ -2051,6 +2231,7 @@
           '<Default Extension="xml" ContentType="application/xml"/>' +
           '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
           '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+          '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' +
           '</Types>' },
         { path: '_rels/.rels', data:
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -2066,7 +2247,26 @@
           '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
           '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
           '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
           '</Relationships>' },
+        { path: 'xl/styles.xml', data:
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+          '<fonts count="2">' +
+          '<font><sz val="11"/><name val="Calibri"/></font>' +
+          '<font><b/><sz val="11"/><name val="Calibri"/></font>' +
+          '</fonts>' +
+          '<fills count="2">' +
+          '<fill><patternFill patternType="none"/></fill>' +
+          '<fill><patternFill patternType="gray125"/></fill>' +
+          '</fills>' +
+          '<borders count="1"><border/></borders>' +
+          '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+          '<cellXfs count="2">' +
+          '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>' +
+          '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>' +
+          '</cellXfs>' +
+          '</styleSheet>' },
         { path: 'xl/worksheets/sheet1.xml', data: worksheetXml(columns, rows) }
       ];
       return zipStore(parts);
@@ -2182,10 +2382,50 @@
         case 'export':
           exportBatch(id);
           break;
+        case 'ask-rename':
+          confirmingId = null;
+          editingId = id;
+          renderBatchList();
+          focusRenameInput();
+          break;
+        case 'cancel-rename':
+          editingId = null;
+          renderBatchList();
+          break;
+        case 'do-rename': {
+          const input = target.closest('.batch-edit').querySelector('[data-role="rename-input"]');
+          renameBatch(id, input ? input.value : '');
+          break;
+        }
         case 'toggle-resolved':
           showResolved = !showResolved;
           renderBatchList();
           break;
+      }
+    });
+
+    function focusRenameInput() {
+      const input = els.batchList.querySelector('[data-role="rename-input"]');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+
+    // Enter saves the rename, Escape cancels — without closing the dropdown.
+    els.batchList.addEventListener('keydown', function (event) {
+      const input = event.target.closest('[data-role="rename-input"]');
+      if (!input) {
+        return;
+      }
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        renameBatch(editingId, input.value);
+      } else if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        editingId = null;
+        renderBatchList();
       }
     });
 
@@ -2228,17 +2468,25 @@
 
     async function refreshBatches() {
       if (!isConfigured() || !navigator.onLine) {
+        // Nothing to wait for — drop the loading state and show what we have.
+        hasLoadedBatches = true;
+        render();
         return;
       }
       try {
         const response = await fetch(GAS_URL, { method: 'GET' });
         const data = await response.json();
         if (data && data.status === 'success') {
+          hasLoadedBatches = true;
           storeBatches(data.batches, data.retentionDays);
+          return;
         }
       } catch (err) {
         // Keep showing the last known figures rather than blanking them out.
       }
+      // Reached only on failure: stop loading so the UI can settle.
+      hasLoadedBatches = true;
+      render();
     }
 
     // ===================================================================
