@@ -1,0 +1,2285 @@
+<!DOCTYPE html>
+<html lang="en-IN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#000000">
+  <title>Cash Logger</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <style>
+    :root {
+      --bg: #000000;
+      --surface: #1c1c1e;
+      --surface-2: #2c2c2e;
+      --line: #38383a;
+      --text: #ffffff;
+      --text-dim: #98989f;
+
+      /* Two blues on purpose: --accent has 4.7:1 against the dark surfaces for
+         text and outlines, --accent-fill is dark enough for white label text. */
+      --accent: #0a84ff;
+      --accent-fill: #0060df;
+
+      --danger: #ff453a;
+      --danger-soft: #ff6961;
+      --warn: #ffd60a;
+      --success: #30d158;
+
+      --radius: 14px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      min-height: 100vh;
+      padding: max(24px, env(safe-area-inset-top)) 20px calc(28px + env(safe-area-inset-bottom));
+      display: flex;
+      justify-content: center;
+    }
+
+    /* Top-aligned column: opening the entry panel grows the page downwards
+       instead of re-centring everything and shifting the mic under the thumb. */
+    .app {
+      width: 100%;
+      max-width: 360px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+    }
+
+    /* ---------- balance ---------- */
+
+    .balance {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+      text-align: center;
+    }
+
+    .balance-label {
+      display: block;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .balance-value {
+      display: block;
+      margin-top: 4px;
+      font-size: 34px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.15;
+    }
+
+    .balance-value.is-negative {
+      color: var(--danger-soft);
+    }
+
+    .balance-note {
+      display: block;
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--text-dim);
+      min-height: 15px;
+    }
+
+    /* ---------- mic ---------- */
+
+    .mic-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .mic {
+      width: 130px;
+      height: 130px;
+      border: none;
+      border-radius: 50%;
+      background: var(--danger);
+      color: #ffffff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 20px rgba(255, 69, 58, 0.4);
+      transition: transform 0.12s ease, background-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .mic:active {
+      transform: scale(0.95);
+    }
+
+    .mic[disabled] {
+      background: var(--surface-2);
+      color: var(--text-dim);
+      box-shadow: none;
+      cursor: not-allowed;
+    }
+
+    .mic.is-listening {
+      background: var(--success);
+      box-shadow: 0 4px 24px rgba(48, 209, 88, 0.5);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.05); }
+    }
+
+    .status {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.4;
+      color: var(--text-dim);
+      min-height: 42px;
+      text-align: center;
+    }
+
+    .status.is-error { color: var(--danger-soft); }
+    .status.is-warn { color: var(--warn); }
+    .status.is-success { color: var(--success); }
+
+    /* ---------- entry panel ---------- */
+
+    .panel {
+      width: 100%;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 20px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      animation: rise 0.18s ease-out;
+    }
+
+    .panel[hidden] {
+      display: none;
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: none; }
+    }
+
+    .panel-title {
+      margin: 0 0 4px;
+      font-size: 17px;
+      font-weight: 600;
+      text-align: left;
+    }
+
+    .panel-sub {
+      margin: 0 0 14px;
+      font-size: 13px;
+      color: var(--text-dim);
+      text-align: left;
+    }
+
+    .panel-sub[hidden] {
+      display: none;
+    }
+
+    .field {
+      display: block;
+      margin-bottom: 12px;
+      text-align: left;
+    }
+
+    .field[hidden] {
+      display: none;
+    }
+
+    .field-label {
+      display: block;
+      margin-bottom: 5px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    input {
+      width: 100%;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-size: 16px; /* 16px or larger stops iOS zooming on focus */
+      font-family: inherit;
+    }
+
+    input:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    input[aria-invalid="true"] {
+      border-color: var(--danger-soft);
+    }
+
+    .panel-error {
+      margin: 0 0 12px;
+      font-size: 13px;
+      color: var(--danger-soft);
+      text-align: left;
+    }
+
+    .panel-error[hidden] {
+      display: none;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .action-btn {
+      flex: 1;
+      padding: 13px 18px;
+      border: none;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .action-btn[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .action-btn.primary {
+      background: var(--accent-fill);
+      color: #ffffff;
+    }
+
+    .action-btn.secondary {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    /* ---------- footer actions ---------- */
+
+    .ghost-btn {
+      background: var(--surface);
+      color: var(--accent);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      padding: 11px 20px;
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    /* ---------- batch bar + dropdown ---------- */
+
+    /* Both states and the dropdown share one positioning context, so the list
+       hangs off whichever trigger is currently on screen. */
+    .batch-zone {
+      position: relative;
+      width: 100%;
+    }
+
+    .batch-bar {
+      display: flex;
+      gap: 10px;
+    }
+
+    .batch-bar[hidden],
+    .batch-empty[hidden] {
+      display: none;
+    }
+
+    .batch-empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .batch-current {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 15px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .batch-current .name {
+      flex: 1;
+      min-width: 0;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .batch-current .left {
+      flex-shrink: 0;
+      font-size: 13px;
+      color: var(--text-dim);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .chev {
+      flex-shrink: 0;
+      transition: transform 0.18s ease;
+    }
+
+    .batch-current[aria-expanded="true"] .chev {
+      transform: rotate(180deg);
+    }
+
+    .batch-add {
+      flex-shrink: 0;
+      width: 48px;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 24px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    /* The bar stays put when no batch qualifies; only its wording goes quiet. */
+    .batch-current.is-idle .name {
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+
+    .link-btn {
+      background: none;
+      border: none;
+      padding: 4px 8px;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .link-btn[hidden] {
+      display: none;
+    }
+
+    .batch-list {
+      position: absolute;
+      top: calc(100% + 8px);
+      left: 0;
+      right: 0;
+      z-index: 20;
+      margin: 0;
+      padding: 6px;
+      list-style: none;
+      max-height: 264px;
+      overflow-y: auto;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+      animation: rise 0.16s ease-out;
+    }
+
+    .batch-list[hidden] {
+      display: none;
+    }
+
+    .batch-row {
+      display: flex;
+      align-items: stretch;
+      gap: 4px;
+    }
+
+    .batch-option {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 12px;
+      background: none;
+      border: none;
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .batch-option:hover {
+      background: var(--surface-2);
+    }
+
+    .batch-option[aria-current="true"] {
+      background: rgba(10, 132, 255, 0.16);
+    }
+
+    .batch-option.is-spent .opt-name,
+    .batch-option.is-spent .opt-balance {
+      color: var(--text-dim);
+    }
+
+    .opt-resolve,
+    .opt-export {
+      flex-shrink: 0;
+      width: 38px;
+      background: none;
+      border: none;
+      border-radius: 8px;
+      color: var(--text-dim);
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    .opt-export {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .opt-resolve:hover,
+    .opt-export:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    /* Resolving schedules the rows for removal, so it asks first — inline,
+       rather than a confirm() dialog that in-app browsers can suppress. */
+    .batch-confirm {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: var(--surface-2);
+    }
+
+    .confirm-text {
+      display: block;
+      font-size: 13px;
+      line-height: 1.45;
+      color: var(--text);
+      text-align: left;
+    }
+
+    .confirm-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .confirm-row button {
+      flex: 1;
+      padding: 8px;
+      border: none;
+      border-radius: 6px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .confirm-no {
+      background: var(--line);
+      color: var(--text);
+    }
+
+    .confirm-yes {
+      background: var(--accent-fill);
+      color: #ffffff;
+    }
+
+    .batch-divider {
+      margin: 6px 4px 2px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+    }
+
+    .batch-toggle {
+      width: 100%;
+      padding: 8px 12px;
+      background: none;
+      border: none;
+      border-radius: 8px;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 13px;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .batch-toggle:hover {
+      background: var(--surface-2);
+    }
+
+    .opt-undo {
+      flex-shrink: 0;
+      padding: 0 10px;
+      background: none;
+      border: none;
+      border-radius: 8px;
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .opt-undo:hover {
+      background: var(--surface-2);
+    }
+
+    .opt-top {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .opt-name {
+      flex: 1;
+      min-width: 0;
+      font-size: 15px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .opt-balance {
+      flex-shrink: 0;
+      font-size: 15px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .opt-sub {
+      display: block;
+      margin-top: 3px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .batch-empty-note {
+      margin: 0;
+      padding: 14px 12px;
+      font-size: 13px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+
+    .banner {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 10px;
+      background: rgba(255, 69, 58, 0.14);
+      border: 1px solid var(--danger-soft);
+      color: var(--danger-soft);
+      font-size: 13px;
+      line-height: 1.45;
+      text-align: left;
+    }
+
+    .banner[hidden] {
+      display: none;
+    }
+
+    .banner code {
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <main class="app">
+
+    <p class="banner" id="config-banner" role="alert" hidden>
+      Not connected yet. Open this file and set <code>GAS_URL</code> to your deployed
+      Apps Script web app URL. Until then, nothing can be saved.
+    </p>
+
+    <section class="balance" aria-labelledby="balance-label">
+      <span class="balance-label" id="balance-label">Cash in hand</span>
+      <span class="balance-value" id="balance-value">—</span>
+      <span class="balance-note" id="balance-note"></span>
+    </section>
+
+    <div class="mic-wrap">
+      <button type="button" id="mic-btn" class="mic" aria-label="Record an entry by voice">
+        <svg viewBox="0 0 24 24" width="52" height="52" fill="none" stroke="currentColor"
+             stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="9" y="2" width="6" height="11" rx="3"></rect>
+          <path d="M5 10a7 7 0 0 0 14 0"></path>
+          <line x1="12" y1="17" x2="12" y2="21"></line>
+          <line x1="8" y1="21" x2="16" y2="21"></line>
+        </svg>
+      </button>
+      <p class="status" id="status" role="status" aria-live="polite">Tap to speak…</p>
+    </div>
+
+    <section class="panel" id="entry-panel" aria-labelledby="panel-title" hidden>
+      <h2 class="panel-title" id="panel-title">Confirm entry</h2>
+      <p class="panel-sub" id="panel-sub" hidden></p>
+
+      <p class="panel-error" id="panel-error" role="alert" hidden></p>
+
+      <label class="field" for="date-input">
+        <span class="field-label">Date</span>
+        <input type="date" id="date-input">
+      </label>
+
+      <label class="field" for="amt-input">
+        <span class="field-label">Amount (₹)</span>
+        <input type="number" id="amt-input" step="0.01" min="0" inputmode="decimal" placeholder="0.00">
+      </label>
+
+      <label class="field" id="description-field" for="description-input">
+        <span class="field-label">Description</span>
+        <input type="text" id="description-input" placeholder="What was this for?">
+      </label>
+
+      <div class="btn-row">
+        <button type="button" id="cancel-btn" class="action-btn secondary">Cancel</button>
+        <button type="button" id="save-btn" class="action-btn primary">Save</button>
+      </div>
+    </section>
+
+    <div class="batch-zone" id="batch-zone">
+
+      <!-- Shown as soon as any batch exists, active or not, so the history is
+           always one tap away. The bar goes muted when nothing qualifies. -->
+      <div class="batch-bar" id="batch-bar" hidden>
+        <button type="button" class="batch-current" id="batch-current"
+                aria-expanded="false" aria-controls="batch-list">
+          <span class="name" id="batch-name">—</span>
+          <span class="left" id="batch-left"></span>
+          <svg class="chev" viewBox="0 0 24 24" width="16" height="16" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round"
+               stroke-linejoin="round" aria-hidden="true">
+            <polyline points="6 9 12 15 18 9"></polyline>
+          </svg>
+        </button>
+        <button type="button" class="batch-add" id="batch-add"
+                aria-label="Start a new cash batch">+</button>
+      </div>
+
+      <!-- First run only: no batches at all, so there is no history to browse. -->
+      <div class="batch-empty" id="batch-empty" hidden>
+        <button type="button" id="new-batch-btn" class="ghost-btn">+ Start new cash batch</button>
+      </div>
+
+      <ul class="batch-list" id="batch-list" aria-label="Cash batches" hidden></ul>
+
+    </div>
+
+  </main>
+
+  <script>
+    'use strict';
+
+    // -------------------------------------------------------------------
+    // CONFIGURATION — paste your deployed Apps Script web app URL here.
+    // Deploy > New deployment > Web app, "Execute as: Me",
+    // "Who has access: Anyone". The URL ends in /exec.
+    // -------------------------------------------------------------------
+    const GAS_URL = 'https://script.google.com/macros/s/AKfycbyEo_flP59mhKZlCceoVMX8MDC3vPQxnFFhS_9CfdCul6_GA_Z3ylTcNfPKTFwODdalQQ/exec';
+
+    const QUEUE_KEY = 'cashLogger.queue.v2';
+    const REJECTED_KEY = 'cashLogger.rejected.v2';
+    const BATCHES_KEY = 'cashLogger.batches.v2';
+    const SELECTED_KEY = 'cashLogger.selectedBatch.v2';
+    const RETENTION_KEY = 'cashLogger.retentionDays.v2';
+
+    // A batch stops being offered automatically once it has gone this long
+    // without an entry, even if money is left in it.
+    const ACTIVE_WINDOW_DAYS = 10;
+
+    const els = {
+      banner: document.getElementById('config-banner'),
+      balanceValue: document.getElementById('balance-value'),
+      balanceNote: document.getElementById('balance-note'),
+      mic: document.getElementById('mic-btn'),
+      status: document.getElementById('status'),
+      panel: document.getElementById('entry-panel'),
+      panelTitle: document.getElementById('panel-title'),
+      panelError: document.getElementById('panel-error'),
+      date: document.getElementById('date-input'),
+      amount: document.getElementById('amt-input'),
+      descriptionField: document.getElementById('description-field'),
+      description: document.getElementById('description-input'),
+      panelSub: document.getElementById('panel-sub'),
+      cancel: document.getElementById('cancel-btn'),
+      save: document.getElementById('save-btn'),
+      newBatch: document.getElementById('new-batch-btn'),
+      batchBar: document.getElementById('batch-bar'),
+      batchCurrent: document.getElementById('batch-current'),
+      batchName: document.getElementById('batch-name'),
+      batchLeft: document.getElementById('batch-left'),
+      batchAdd: document.getElementById('batch-add'),
+      batchEmpty: document.getElementById('batch-empty'),
+      batchList: document.getElementById('batch-list'),
+      batchZone: document.getElementById('batch-zone')
+    };
+
+    // minimumFractionDigits 0 so whole amounts read "₹9,750" rather than
+    // "₹9,750.00"; paise still show when there are any.
+    const rupees = new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2
+    });
+
+    let pendingType = 'disbursement';
+    let isListening = false;
+    let isFlushing = false;
+
+    // Batches as currently displayed (server figures with the offline queue
+    // applied on top) and the one new entries are being logged against.
+    let batches = [];
+    let visibleBatches = [];
+    let resolvedBatches = [];
+    let activeBatch = null;
+
+    let showResolved = false;
+    let confirmingId = null;
+    let retentionDays = 15;
+
+    // ===================================================================
+    // DATES  (all local — toISOString() is UTC and rolls back the date
+    // between midnight and 05:30 in IST)
+    // ===================================================================
+
+    function startOfToday() {
+      const now = new Date();
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    }
+
+    function toLocalISODate(date) {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, '0');
+      const day = String(date.getDate()).padStart(2, '0');
+      return year + '-' + month + '-' + day;
+    }
+
+    const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
+                    'july', 'august', 'september', 'october', 'november', 'december'];
+
+    const SMALL_ORDINALS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7 };
+
+    /**
+     * Returns { formattedDate, index, length }. index is -1 when nothing was
+     * recognised; the caller strips the matched span by position rather than by
+     * string replace, so a stray "5" from "5th July" cannot leak into the amount.
+     */
+    function extractSpokenDate(transcript) {
+      const today = startOfToday();
+
+      const relative = [
+        { pattern: /\bday before yesterday\b/, offset: -2 },
+        { pattern: /\byesterday\b/, offset: -1 },
+        { pattern: /\btoday\b/, offset: 0 }
+      ];
+
+      for (const rule of relative) {
+        const match = transcript.match(rule.pattern);
+        if (match) {
+          const target = new Date(today);
+          target.setDate(today.getDate() + rule.offset);
+          return result(target, match);
+        }
+      }
+
+      const ago = transcript.match(/\b(\d{1,2}|one|two|three|four|five|six|seven)\s+days?\s+ago\b/);
+      if (ago) {
+        const count = SMALL_ORDINALS[ago[1]] || parseInt(ago[1], 10);
+        if (isFinite(count)) {
+          const target = new Date(today);
+          target.setDate(today.getDate() - count);
+          return result(target, ago);
+        }
+      }
+
+      const names = MONTHS.join('|');
+      const spoken = new RegExp(
+        '(?:\\b(\\d{1,2})(?:st|nd|rd|th)?\\s*(?:of\\s+)?(' + names + ')\\b)' +
+        '|(?:\\b(' + names + ')\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b)'
+      );
+
+      const match = transcript.match(spoken);
+      if (match) {
+        const day = parseInt(match[1] || match[4], 10);
+        const month = MONTHS.indexOf(match[2] || match[3]);
+
+        // Build the date in one shot. Doing setMonth() then setDate() on today
+        // overflows: on the 31st, setMonth(1) lands in March before the day is set.
+        let target = new Date(today.getFullYear(), month, day);
+
+        const valid = target.getMonth() === month && target.getDate() === day;
+        if (valid) {
+          if (target > today) {
+            target = new Date(today.getFullYear() - 1, month, day);
+          }
+          return result(target, match);
+        }
+      }
+
+      return { formattedDate: toLocalISODate(today), index: -1, length: 0 };
+
+      function result(date, match) {
+        return { formattedDate: toLocalISODate(date), index: match.index, length: match[0].length };
+      }
+    }
+
+    // ===================================================================
+    // AMOUNT + PURPOSE PARSING
+    // ===================================================================
+
+    const NUMBER_WORDS = {
+      zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7,
+      eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13,
+      fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18,
+      nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60,
+      seventy: 70, eighty: 80, ninety: 90
+    };
+
+    const MULTIPLIERS = {
+      hundred: 100, hundreds: 100,
+      thousand: 1000, thousands: 1000, k: 1000,
+      lakh: 100000, lakhs: 100000, lac: 100000, lacs: 100000,
+      crore: 10000000, crores: 10000000
+    };
+
+    const CURRENCY_WORD = /^(?:rupees?|rupaye|rupaiya|rupay|rs\.?|inr|₹|only)$/;
+
+    function normalise(token) {
+      return token.replace(/[^a-z0-9.]/g, '');
+    }
+
+    function tokenize(text) {
+      const tokens = [];
+      const pattern = /\S+/g;
+      let match;
+      while ((match = pattern.exec(text)) !== null) {
+        tokens.push({ text: match[0], start: match.index, end: match.index + match[0].length });
+      }
+      return tokens;
+    }
+
+    /** Consumes one run of number tokens ("fifteen hundred", "1,500", "2.5k"). */
+    function readNumberRun(tokens, from) {
+      let total = 0;
+      let current = 0;
+      let matched = false;
+      let i = from;
+
+      while (i < tokens.length) {
+        const word = normalise(tokens[i].text.toLowerCase().replace(/,/g, ''));
+        let handled = false;
+
+        const suffixed = /^(\d+(?:\.\d+)?)(k|lakhs?|lacs?|crores?)$/.exec(word);
+
+        if (/^\d+(?:\.\d+)?$/.test(word)) {
+          current += parseFloat(word);
+          handled = true;
+
+        } else if (suffixed) {
+          total += parseFloat(suffixed[1]) * MULTIPLIERS[suffixed[2]];
+          current = 0;
+          handled = true;
+
+        } else if (Object.prototype.hasOwnProperty.call(NUMBER_WORDS, word)) {
+          current += NUMBER_WORDS[word];
+          handled = true;
+
+        } else if (Object.prototype.hasOwnProperty.call(MULTIPLIERS, word)) {
+          const factor = MULTIPLIERS[word];
+          if (current === 0) {
+            current = 1;
+          }
+          if (factor === 100) {
+            current *= factor;
+          } else {
+            total += current * factor;
+            current = 0;
+          }
+          handled = true;
+
+        } else if (word === 'and' && matched) {
+          // Only bridge "and" when a number actually follows it.
+          const next = tokens[i + 1] && normalise(tokens[i + 1].text.toLowerCase());
+          handled = Boolean(next) &&
+            (/^\d/.test(next) ||
+             Object.prototype.hasOwnProperty.call(NUMBER_WORDS, next) ||
+             Object.prototype.hasOwnProperty.call(MULTIPLIERS, next));
+        }
+
+        if (!handled) {
+          break;
+        }
+        matched = true;
+        i++;
+      }
+
+      if (!matched) {
+        return null;
+      }
+
+      return {
+        value: total + current,
+        start: tokens[from].start,
+        end: tokens[i - 1].end,
+        startToken: from,
+        endToken: i
+      };
+    }
+
+    /**
+     * Picks the number a currency word attaches to ("500 rupees", "rs 500"),
+     * falling back to the largest. "2 kg rice 500 rupees" gives 500, not 2.
+     */
+    function extractAmount(transcript) {
+      const tokens = tokenize(transcript);
+      const candidates = [];
+
+      let i = 0;
+      while (i < tokens.length) {
+        const run = readNumberRun(tokens, i);
+        if (run) {
+          candidates.push(run);
+          i = run.endToken;
+        } else {
+          i++;
+        }
+      }
+
+      if (!candidates.length) {
+        return null;
+      }
+
+      let chosen = null;
+      for (const candidate of candidates) {
+        const after = tokens[candidate.endToken];
+        const before = tokens[candidate.startToken - 1];
+        const attached =
+          (after && CURRENCY_WORD.test(normalise(after.text.toLowerCase()))) ||
+          (before && CURRENCY_WORD.test(normalise(before.text.toLowerCase())));
+
+        if (attached) {
+          chosen = candidate;
+          // Swallow the trailing currency word so it never reaches the description.
+          if (after && CURRENCY_WORD.test(normalise(after.text.toLowerCase()))) {
+            chosen = Object.assign({}, candidate, { end: after.end });
+          }
+          break;
+        }
+      }
+
+      if (!chosen) {
+        chosen = candidates.reduce(function (best, candidate) {
+          return candidate.value > best.value ? candidate : best;
+        });
+      }
+
+      return chosen;
+    }
+
+    function stripRange(text, start, end) {
+      return (text.slice(0, start) + ' ' + text.slice(end)).replace(/\s+/g, ' ').trim();
+    }
+
+    /**
+     * The description is whatever the date and amount passes left behind — kept
+     * as spoken, not re-interpreted. The only tidying is: drop currency words
+     * (they belonged to the amount), drop a single natural lead-in the way people
+     * actually talk ("I paid… for…"), collapse spacing, and capitalise.
+     *
+     * Word boundaries matter throughout: the old unanchored /rs|for/ turned
+     * "first" into "fit" and "repairs" into "repai".
+     */
+    function buildDescription(text) {
+      const cleaned = text
+        .replace(/\b(?:rupees?|rupaye|rupaiya|rupay|rupaya|rs|inr|only)\b/gi, ' ')
+        .replace(/^\s*(?:i\s+)?(?:paid|spent|gave|given|give|bought|buy|purchased)\s+/i, ' ')
+        .replace(/^\s*(?:for|to|on|towards|of|in)\s+/i, ' ')
+        .replace(/[\s,]+/g, ' ')
+        .trim();
+
+      return cleaned ? cleaned.charAt(0).toUpperCase() + cleaned.slice(1) : '';
+    }
+
+    /**
+     * Three independent passes, no grammar and no fixed order: the date claims
+     * its phrase wherever it sits, the amount claims its number from what is
+     * left, and the description is the remainder. Each pass cuts by character
+     * position so a stray digit from a date can never leak into the amount.
+     */
+    function parseTranscript(raw) {
+      const transcript = raw.toLowerCase().trim();
+
+      const date = extractSpokenDate(transcript);
+      let remaining = transcript;
+
+      if (date.index >= 0) {
+        let start = date.index;
+        const end = date.index + date.length;
+
+        // A spoken date usually rides on a connective — "on 12 june", "dated 5
+        // july". Pull that word out with the date so it cannot strand itself in
+        // the description as a dangling "… on".
+        const lead = transcript.slice(0, start).match(/\b(?:on|in|from|dated|date|of)\s+$/i);
+        if (lead) {
+          start = lead.index;
+        }
+
+        remaining = stripRange(transcript, start, end);
+      }
+
+      const amount = extractAmount(remaining);
+      if (amount) {
+        remaining = stripRange(remaining, amount.start, amount.end);
+      }
+
+      return {
+        date: date.formattedDate,
+        amount: amount ? amount.value : null,
+        description: buildDescription(remaining)
+      };
+    }
+
+    // ===================================================================
+    // SPEECH
+    // ===================================================================
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    let recognition = null;
+
+    if (SpeechRecognition) {
+      recognition = new SpeechRecognition();
+      recognition.lang = 'en-IN';
+      recognition.interimResults = false;
+      recognition.continuous = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = function () {
+        isListening = true;
+        els.mic.classList.add('is-listening');
+        els.mic.setAttribute('aria-label', 'Stop recording');
+        setStatus('Listening…');
+        closePanel();
+      };
+
+      recognition.onend = function () {
+        isListening = false;
+        els.mic.classList.remove('is-listening');
+        els.mic.setAttribute('aria-label', 'Record an entry by voice');
+      };
+
+      recognition.onerror = function (event) {
+        isListening = false;
+        els.mic.classList.remove('is-listening');
+
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          setStatus('Microphone blocked. Allow access, or tap "+ Start new cash batch" to enter by hand.', 'error');
+        } else if (event.error === 'no-speech') {
+          setStatus('Did not catch that. Tap and try again.', 'warn');
+        } else {
+          setStatus('Speech recognition failed. Tap to try again.', 'error');
+        }
+      };
+
+      recognition.onresult = function (event) {
+        const transcript = event.results[0][0].transcript;
+        const parsed = parseTranscript(transcript);
+
+        setStatus('Heard: "' + transcript + '"');
+
+        openPanel('disbursement', {
+          date: parsed.date,
+          amount: parsed.amount === null ? '' : String(parsed.amount),
+          description: parsed.description
+        });
+
+        // The missing-batch warning openPanel may have set is the blocking one.
+        if (activeBatch && parsed.amount === null) {
+          showPanelError('No amount recognised — please type it in.');
+          els.amount.focus();
+        }
+      };
+
+    } else {
+      els.mic.disabled = true;
+      setStatus('Voice input is not supported in this browser. Use "+ Start new cash batch" to enter amounts by hand.', 'warn');
+    }
+
+    els.mic.addEventListener('click', function () {
+      if (!recognition) {
+        return;
+      }
+      if (isListening) {
+        recognition.stop();
+        return;
+      }
+      try {
+        recognition.start();
+      } catch (err) {
+        // start() throws if the previous session has not fully ended yet.
+        setStatus('Still finishing the last recording — tap again in a moment.', 'warn');
+      }
+    });
+
+    // ===================================================================
+    // PANEL
+    // ===================================================================
+
+    function openPanel(type, values) {
+      pendingType = type;
+
+      els.panelTitle.textContent = type === 'batch' ? 'New cash batch' : 'Confirm entry';
+      els.descriptionField.hidden = (type === 'batch');
+
+      // Entries can be redirected to any batch now, so never let someone save
+      // without seeing which one the money leaves.
+      if (type === 'batch') {
+        els.panelSub.hidden = true;
+      } else {
+        els.panelSub.hidden = false;
+        els.panelSub.textContent = activeBatch
+          ? 'From ' + activeBatch.name + ' · ' + rupees.format(activeBatch.balance) + ' left'
+          : 'No cash batch selected.';
+      }
+
+      els.date.value = values.date || toLocalISODate(startOfToday());
+      els.amount.value = values.amount || '';
+      els.description.value = values.description || '';
+
+      clearPanelError();
+      els.panel.hidden = false;
+      els.save.disabled = false;
+
+      // Flag the blocking problem now rather than after they hit Save.
+      if (type === 'disbursement' && !activeBatch) {
+        showPanelError('Start a cash batch before logging a spend.');
+      }
+    }
+
+    function closePanel() {
+      els.panel.hidden = true;
+      clearPanelError();
+    }
+
+    function showPanelError(message, field) {
+      els.panelError.textContent = message;
+      els.panelError.hidden = false;
+      if (field) {
+        field.setAttribute('aria-invalid', 'true');
+      }
+    }
+
+    function clearPanelError() {
+      els.panelError.hidden = true;
+      els.panelError.textContent = '';
+      els.amount.removeAttribute('aria-invalid');
+      els.description.removeAttribute('aria-invalid');
+    }
+
+    els.cancel.addEventListener('click', function () {
+      closePanel();
+      setStatus('Tap to speak…');
+    });
+
+    function startNewBatch() {
+      // Replaces the old prompt(): same panel, so a batch can be backdated and
+      // is never submitted from fields the user cannot see.
+      closeBatchList();
+      openPanel('batch', { date: toLocalISODate(startOfToday()), amount: '', description: '' });
+      els.amount.focus();
+    }
+
+    els.newBatch.addEventListener('click', startNewBatch);
+    els.batchAdd.addEventListener('click', startNewBatch);
+
+    els.save.addEventListener('click', function () {
+      clearPanelError();
+
+      const amount = Number(els.amount.value);
+      if (!isFinite(amount) || amount <= 0) {
+        showPanelError('Enter an amount greater than zero.', els.amount);
+        els.amount.focus();
+        return;
+      }
+
+      const description = els.description.value.trim();
+      if (pendingType === 'disbursement' && !description) {
+        showPanelError('Enter a description.', els.description);
+        els.description.focus();
+        return;
+      }
+
+      // Spending has to come out of something. Refuse rather than guess.
+      if (pendingType === 'disbursement' && !activeBatch) {
+        showPanelError('No cash batch selected — start one first.');
+        return;
+      }
+
+      // Guard against a double tap writing the row twice on a slow connection.
+      els.save.disabled = true;
+
+      // The type travels as its own field. It used to be inferred from the
+      // description text reading exactly "NEW BATCH", which broke the moment
+      // anyone spoke or typed it in lower case.
+      const entry = {
+        id: newId(),
+        type: pendingType,
+        date: els.date.value || toLocalISODate(startOfToday()),
+        amount: amount,
+        description: pendingType === 'batch' ? '' : description
+      };
+
+      if (pendingType === 'batch') {
+        // Log into the batch just created rather than whatever was selected before.
+        writeValue(SELECTED_KEY, entry.id);
+      } else {
+        entry.batchId = activeBatch.id;
+      }
+
+      closePanel();
+      enqueue(entry);
+    });
+
+    // ===================================================================
+    // QUEUE + SYNC
+    // ===================================================================
+
+    function newId() {
+      if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+        return window.crypto.randomUUID();
+      }
+      return 'e-' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+    }
+
+    function readStore(key) {
+      try {
+        const value = JSON.parse(localStorage.getItem(key));
+        return Array.isArray(value) ? value : [];
+      } catch (err) {
+        return [];
+      }
+    }
+
+    function writeStore(key, value) {
+      try {
+        localStorage.setItem(key, JSON.stringify(value));
+      } catch (err) {
+        setStatus('Could not save locally — device storage is full.', 'error');
+      }
+    }
+
+    function isConfigured() {
+      return /^https:\/\/script\.google(usercontent)?\.com\//.test(GAS_URL) ||
+             (/^https?:\/\//.test(GAS_URL) && GAS_URL.indexOf('YOUR_WEB_APP_URL') === -1);
+    }
+
+    // Every entry is written to the queue before it is sent. Nothing is lost if
+    // the page closes mid-request, and entries always reach the sheet in the
+    // order they were made — the old code posted the newest entry first and
+    // flushed older ones behind it, which scrambled the balance column.
+    function enqueue(entry) {
+      const queue = readStore(QUEUE_KEY);
+      queue.push(entry);
+      writeStore(QUEUE_KEY, queue);
+
+      render();
+      flushQueue();
+    }
+
+    async function postEntry(entry) {
+      // No Content-Type header on purpose. Setting one makes this a non-simple
+      // CORS request, and Apps Script cannot answer the preflight that follows.
+      const response = await fetch(GAS_URL, {
+        method: 'POST',
+        body: JSON.stringify(entry)
+      });
+
+      if (!response.ok) {
+        throw new Error('HTTP ' + response.status);
+      }
+
+      const text = await response.text();
+
+      try {
+        return JSON.parse(text);
+      } catch (err) {
+        // Almost always a Google sign-in page: the deployment is not public.
+        throw new Error('Unexpected response — check the deployment is set to "Anyone".');
+      }
+    }
+
+    async function flushQueue() {
+      if (isFlushing) {
+        return;
+      }
+
+      if (!isConfigured()) {
+        els.banner.hidden = false;
+        // Only claim something is stuck if something actually is; the banner
+        // already explains the missing configuration on a fresh load.
+        if (readStore(QUEUE_KEY).length) {
+          setStatus('Saved on this device only — not connected to a sheet yet.', 'error');
+        }
+        return;
+      }
+
+      isFlushing = true;
+
+      try {
+        while (true) {
+          const queue = readStore(QUEUE_KEY);
+
+          if (!queue.length) {
+            break;
+          }
+
+          if (!navigator.onLine) {
+            setStatus('Offline — ' + describe(queue.length) + ' waiting to sync.', 'warn');
+            break;
+          }
+
+          setStatus(queue.length > 1 ? 'Syncing ' + describe(queue.length) + '…' : 'Saving…');
+
+          let result;
+          try {
+            result = await postEntry(queue[0]);
+          } catch (err) {
+            // Network or transport failure: keep the entry and retry later.
+            setStatus('Not saved yet — ' + describe(queue.length) + ' waiting. Will retry.', 'warn');
+            break;
+          }
+
+          if (result && result.status === 'success') {
+            shiftQueue();
+            storeBatches(result.batches, result.retentionDays);
+            const left = readStore(QUEUE_KEY).length;
+            setStatus(left ? 'Synced. ' + describe(left) + ' left…' : 'Saved.', 'success');
+
+          } else {
+            // The server rejected it outright, so retrying cannot help. Park it
+            // where it can still be recovered instead of blocking the queue.
+            const rejected = readStore(REJECTED_KEY);
+            rejected.push({ entry: queue[0], message: result && result.message, at: new Date().toISOString() });
+            writeStore(REJECTED_KEY, rejected);
+            shiftQueue();
+
+            setStatus('Rejected: ' + ((result && result.message) || 'unknown error') +
+                      ' (kept on this device).', 'error');
+          }
+        }
+      } finally {
+        isFlushing = false;
+        render();
+      }
+    }
+
+    function shiftQueue() {
+      const queue = readStore(QUEUE_KEY);
+      queue.shift();
+      writeStore(QUEUE_KEY, queue);
+    }
+
+    function describe(count) {
+      return count + (count === 1 ? ' entry' : ' entries');
+    }
+
+    // ===================================================================
+    // BATCHES
+    // ===================================================================
+
+    function writeValue(key, value) {
+      try {
+        localStorage.setItem(key, value);
+      } catch (err) { /* storage full — the choice just will not persist */ }
+    }
+
+    function defaultBatchName(isoDate) {
+      const parts = String(isoDate || '').split('-');
+      const date = parts.length === 3
+        ? new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]))
+        : startOfToday();
+
+      // Must match Utilities.formatDate(…, 'd MMM yyyy') in Code.gs so an
+      // optimistic local batch does not get renamed once the server replies.
+      return 'Batch of ' + date.toLocaleDateString('en-IN', {
+        day: 'numeric', month: 'short', year: 'numeric'
+      });
+    }
+
+    function daysSince(isoDate) {
+      if (!isoDate) {
+        return Infinity;
+      }
+      const parts = String(isoDate).split('-');
+      const then = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      return Math.round((startOfToday() - then) / 86400000);
+    }
+
+    function round2(value) {
+      return Math.round(value * 100) / 100;
+    }
+
+    /**
+     * Server figures with the offline queue applied on top, so a batch created
+     * offline is immediately selectable and its balance reflects entries that
+     * have not synced yet. Once an entry syncs it leaves the queue and the
+     * server list already accounts for it, so nothing is counted twice.
+     */
+    function projectBatches() {
+      const stored = readStore(BATCHES_KEY).map(function (batch) {
+        return Object.assign({}, batch);
+      });
+
+      const byId = {};
+      stored.forEach(function (batch) { byId[batch.id] = batch; });
+
+      const created = [];
+
+      readStore(QUEUE_KEY).forEach(function (entry) {
+        if (entry.type === 'batch') {
+          if (byId[entry.id]) {
+            return;
+          }
+          const batch = {
+            id: entry.id,
+            name: defaultBatchName(entry.date),
+            opening: entry.amount,
+            spent: 0,
+            balance: entry.amount,
+            startDate: entry.date,
+            lastDate: entry.date,
+            entries: 0,
+            resolvedOn: '',
+            pending: true
+          };
+          byId[entry.id] = batch;
+          created.unshift(batch);
+          return;
+        }
+
+        const batch = byId[entry.batchId];
+        if (!batch) {
+          return;
+        }
+        batch.pending = true;
+
+        if (entry.type === 'resolve') {
+          batch.resolvedOn = entry.date;
+
+        } else if (entry.type === 'unresolve') {
+          batch.resolvedOn = '';
+
+        } else {
+          batch.spent = round2(batch.spent + entry.amount);
+          batch.balance = round2(batch.balance - entry.amount);
+          batch.entries += 1;
+          if (entry.date > batch.lastDate) {
+            batch.lastDate = entry.date;
+          }
+        }
+      });
+
+      // Newest first: batches queued locally are the most recent of all.
+      return created.concat(stored);
+    }
+
+    function qualifies(batch) {
+      return batch.balance > 0 && daysSince(batch.lastDate) <= ACTIVE_WINDOW_DAYS;
+    }
+
+    /**
+     * An explicit choice from the dropdown wins and is honoured even once the
+     * batch goes stale. Otherwise the newest batch that still has money and has
+     * seen an entry within ACTIVE_WINDOW_DAYS is offered automatically.
+     */
+    function resolveActiveBatch(list) {
+      const selectedId = localStorage.getItem(SELECTED_KEY);
+
+      if (selectedId) {
+        for (const batch of list) {
+          if (batch.id === selectedId) {
+            return batch;
+          }
+        }
+      }
+
+      for (const batch of list) {
+        if (qualifies(batch)) {
+          return batch;
+        }
+      }
+
+      return null;
+    }
+
+    function describeBatch(batch) {
+      const bits = [rupees.format(batch.opening) + ' opened'];
+
+      if (batch.entries) {
+        bits.push(describe(batch.entries));
+      }
+      if (batch.balance <= 0) {
+        bits.push('fully spent');
+      } else {
+        const age = daysSince(batch.lastDate);
+        bits.push(age <= 0 ? 'active today'
+          : age === 1 ? 'last entry yesterday'
+          : 'last entry ' + age + ' days ago');
+      }
+      if (batch.pending) {
+        bits.push('not yet synced');
+      }
+
+      return bits.join(' · ');
+    }
+
+    function retentionNote(batch) {
+      const left = retentionDays - daysSince(batch.resolvedOn);
+      if (left <= 0) {
+        return 'Resolved · due to leave the sheet';
+      }
+      return 'Resolved · leaves the sheet in ' + left + (left === 1 ? ' day' : ' days');
+    }
+
+    function optionBody(name, balanceText, subText) {
+      const fragment = document.createDocumentFragment();
+
+      const top = document.createElement('span');
+      top.className = 'opt-top';
+
+      const label = document.createElement('span');
+      label.className = 'opt-name';
+      label.textContent = name;
+
+      const balance = document.createElement('span');
+      balance.className = 'opt-balance';
+      balance.textContent = balanceText;
+
+      top.appendChild(label);
+      top.appendChild(balance);
+
+      const sub = document.createElement('span');
+      sub.className = 'opt-sub';
+      sub.textContent = subText;
+
+      fragment.appendChild(top);
+      fragment.appendChild(sub);
+      return fragment;
+    }
+
+    function noteRow(text) {
+      const row = document.createElement('li');
+      row.className = 'batch-empty-note';
+      row.textContent = text;
+      return row;
+    }
+
+    function exportButton(batch) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'opt-export';
+      button.dataset.act = 'export';
+      button.dataset.id = batch.id;
+      button.title = 'Export as Excel';
+      button.setAttribute('aria-label', 'Export ' + batch.name + ' as a spreadsheet');
+      button.innerHTML =
+        '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ' +
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+        '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>' +
+        '<polyline points="7 10 12 15 17 10"></polyline>' +
+        '<line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+      return button;
+    }
+
+    function batchRow(batch) {
+      const row = document.createElement('li');
+      row.className = 'batch-row';
+
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'batch-option' + (batch.balance <= 0 ? ' is-spent' : '');
+      option.dataset.act = 'select';
+      option.dataset.id = batch.id;
+      if (activeBatch && activeBatch.id === batch.id) {
+        option.setAttribute('aria-current', 'true');
+      }
+      option.appendChild(optionBody(batch.name, rupees.format(batch.balance), describeBatch(batch)));
+
+      const resolve = document.createElement('button');
+      resolve.type = 'button';
+      resolve.className = 'opt-resolve';
+      resolve.dataset.act = 'ask-resolve';
+      resolve.dataset.id = batch.id;
+      resolve.textContent = '✓';
+      resolve.title = 'Mark resolved';
+      resolve.setAttribute('aria-label', 'Mark ' + batch.name + ' as resolved');
+
+      row.appendChild(option);
+      row.appendChild(exportButton(batch));
+      row.appendChild(resolve);
+      return row;
+    }
+
+    function confirmRow(batch) {
+      const row = document.createElement('li');
+      row.className = 'batch-confirm';
+
+      const text = document.createElement('span');
+      text.className = 'confirm-text';
+      text.textContent = 'Resolve ' + batch.name + '? It is hidden here straight away and leaves the sheet in ' +
+        retentionDays + ' days.' +
+        (batch.balance > 0 ? ' ' + rupees.format(batch.balance) + ' is still showing as unspent.' : '');
+
+      const buttons = document.createElement('span');
+      buttons.className = 'confirm-row';
+
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'confirm-no';
+      no.dataset.act = 'cancel-resolve';
+      no.textContent = 'Cancel';
+
+      const yes = document.createElement('button');
+      yes.type = 'button';
+      yes.className = 'confirm-yes';
+      yes.dataset.act = 'do-resolve';
+      yes.dataset.id = batch.id;
+      yes.textContent = 'Resolve';
+
+      buttons.appendChild(no);
+      buttons.appendChild(yes);
+      row.appendChild(text);
+      row.appendChild(buttons);
+      return row;
+    }
+
+    function resolvedRow(batch) {
+      const row = document.createElement('li');
+      row.className = 'batch-row';
+
+      // A span, not a button: resolved batches cannot be selected or logged to.
+      const option = document.createElement('span');
+      option.className = 'batch-option is-spent';
+      option.appendChild(optionBody(batch.name, rupees.format(batch.balance), retentionNote(batch)));
+
+      const undo = document.createElement('button');
+      undo.type = 'button';
+      undo.className = 'opt-undo';
+      undo.dataset.act = 'unresolve';
+      undo.dataset.id = batch.id;
+      undo.textContent = 'Undo';
+      undo.setAttribute('aria-label', 'Reopen ' + batch.name);
+
+      row.appendChild(option);
+      row.appendChild(exportButton(batch));
+      row.appendChild(undo);
+      return row;
+    }
+
+    function resolvedToggleRow() {
+      const row = document.createElement('li');
+      row.className = 'batch-divider';
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'batch-toggle';
+      button.dataset.act = 'toggle-resolved';
+      button.setAttribute('aria-expanded', showResolved ? 'true' : 'false');
+      button.textContent = (showResolved ? 'Hide' : 'Show') +
+        ' resolved (' + resolvedBatches.length + ')';
+
+      row.appendChild(button);
+      return row;
+    }
+
+    function renderBatchList() {
+      els.batchList.textContent = '';
+
+      if (!batches.length) {
+        els.batchList.appendChild(noteRow('No cash batches yet.'));
+        return;
+      }
+
+      if (!visibleBatches.length) {
+        els.batchList.appendChild(noteRow('No open batches.'));
+      }
+
+      visibleBatches.forEach(function (batch) {
+        els.batchList.appendChild(
+          confirmingId === batch.id ? confirmRow(batch) : batchRow(batch)
+        );
+      });
+
+      // Resolved batches stay out of the list proper, but remain recoverable
+      // until the sheet clears them.
+      if (resolvedBatches.length) {
+        els.batchList.appendChild(resolvedToggleRow());
+        if (showResolved) {
+          resolvedBatches.forEach(function (batch) {
+            els.batchList.appendChild(resolvedRow(batch));
+          });
+        }
+      }
+    }
+
+    function render() {
+      batches = projectBatches();
+      visibleBatches = batches.filter(function (batch) { return !batch.resolvedOn; });
+      resolvedBatches = batches.filter(function (batch) { return Boolean(batch.resolvedOn); });
+      activeBatch = resolveActiveBatch(visibleBatches);
+
+      // The bar stays as soon as anything exists, so the history is always
+      // reachable — not only when there is nothing to log against.
+      if (batches.length) {
+        els.batchBar.hidden = false;
+        els.batchEmpty.hidden = true;
+        els.batchCurrent.classList.toggle('is-idle', !activeBatch);
+        els.batchName.textContent = activeBatch ? activeBatch.name : 'No active batch';
+        els.batchLeft.textContent = activeBatch ? rupees.format(activeBatch.balance) + ' left' : '';
+      } else {
+        els.batchBar.hidden = true;
+        els.batchEmpty.hidden = false;
+        closeBatchList();
+      }
+
+      renderBalance();
+      renderBatchList();
+    }
+
+    function renderBalance() {
+      if (activeBatch) {
+        els.balanceValue.textContent = rupees.format(activeBatch.balance);
+        els.balanceValue.classList.toggle('is-negative', activeBatch.balance < 0);
+      } else {
+        els.balanceValue.textContent = '—';
+        els.balanceValue.classList.remove('is-negative');
+      }
+
+      const notes = [];
+      const funded = visibleBatches.filter(function (batch) { return batch.balance > 0; });
+
+      if (funded.length > 1) {
+        const total = funded.reduce(function (sum, batch) { return sum + batch.balance; }, 0);
+        notes.push(rupees.format(round2(total)) + ' across ' + funded.length + ' batches');
+      }
+
+      const pending = readStore(QUEUE_KEY).length;
+      const rejected = readStore(REJECTED_KEY).length;
+
+      if (pending) {
+        notes.push(describe(pending) + ' not yet synced');
+      }
+      if (rejected) {
+        notes.push(rejected + ' rejected');
+      }
+
+      els.balanceNote.textContent = notes.join(' · ');
+    }
+
+    // ---------- dropdown ----------
+
+    function openBatchList() {
+      confirmingId = null;
+      renderBatchList();
+      els.batchList.hidden = false;
+      els.batchCurrent.setAttribute('aria-expanded', 'true');
+    }
+
+    function closeBatchList() {
+      confirmingId = null;
+      showResolved = false;
+      els.batchList.hidden = true;
+      els.batchCurrent.setAttribute('aria-expanded', 'false');
+    }
+
+    function toggleBatchList() {
+      if (els.batchList.hidden) {
+        openBatchList();
+      } else {
+        closeBatchList();
+      }
+    }
+
+    function findBatch(id) {
+      return batches.filter(function (batch) { return batch.id === id; })[0] || null;
+    }
+
+    function selectBatch(id) {
+      const chosen = findBatch(id);
+      if (!chosen) {
+        return;
+      }
+
+      writeValue(SELECTED_KEY, id);
+      closeBatchList();
+      render();
+      setStatus('Logging to ' + chosen.name + '.');
+      els.batchCurrent.focus();
+    }
+
+    function markResolved(id) {
+      const batch = findBatch(id);
+      if (!batch) {
+        return;
+      }
+
+      // Do not leave a resolved batch as the selected one.
+      if (localStorage.getItem(SELECTED_KEY) === id) {
+        localStorage.removeItem(SELECTED_KEY);
+      }
+
+      enqueue({
+        id: newId(),
+        type: 'resolve',
+        batchId: id,
+        date: toLocalISODate(startOfToday())
+      });
+
+      setStatus(batch.name + ' resolved — it leaves the sheet in ' + retentionDays + ' days.', 'success');
+    }
+
+    function markUnresolved(id) {
+      const batch = findBatch(id);
+      if (!batch) {
+        return;
+      }
+
+      enqueue({
+        id: newId(),
+        type: 'unresolve',
+        batchId: id,
+        date: toLocalISODate(startOfToday())
+      });
+
+      setStatus(batch.name + ' reopened.', 'success');
+    }
+
+    // ---------- export one batch as .xlsx ----------
+
+    async function exportBatch(id) {
+      const batch = findBatch(id);
+      if (!batch) {
+        return;
+      }
+
+      // The line items live in the sheet, not on the device, so export needs
+      // the network — unlike logging, which queues offline.
+      if (!isConfigured()) {
+        setStatus('Connect a sheet before exporting.', 'error');
+        return;
+      }
+      if (!navigator.onLine) {
+        setStatus('Export needs a connection — the rows are in the sheet.', 'warn');
+        return;
+      }
+
+      closeBatchList();
+      setStatus('Preparing ' + batch.name + '…');
+
+      try {
+        const url = GAS_URL + (GAS_URL.indexOf('?') === -1 ? '?' : '&') +
+          'action=export&batchId=' + encodeURIComponent(id);
+
+        const response = await fetch(url, { method: 'GET' });
+        const data = await response.json();
+
+        if (!data || data.status !== 'success') {
+          setStatus('Could not export: ' + ((data && data.message) || 'unknown error'), 'error');
+          return;
+        }
+        if (!data.rows || !data.rows.length) {
+          setStatus('Nothing to export in ' + batch.name + ' yet.', 'warn');
+          return;
+        }
+
+        const name = data.name || batch.name;
+        const blob = buildXlsx(name, data.columns, data.rows);
+        downloadBlob(blob, safeFileName(name) + '.xlsx');
+
+        // A pending batch may have entries still sitting in the sync queue that
+        // the server has not seen, so say so rather than imply completeness.
+        const caveat = batch.pending ? ' (unsynced entries not included)' : '';
+        setStatus('Exported ' + name + caveat + '.', 'success');
+
+      } catch (err) {
+        setStatus('Export failed — check the connection and try again.', 'error');
+      }
+    }
+
+    function safeFileName(name) {
+      return String(name || 'batch')
+        .replace(/[\\/:*?"<>|]+/g, '-')
+        .replace(/\s+/g, ' ')
+        .trim() || 'batch';
+    }
+
+    function downloadBlob(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+    }
+
+    // ---------- minimal .xlsx writer (a stored ZIP of the OOXML parts) ----------
+
+    const CRC_TABLE = (function () {
+      const table = new Uint32Array(256);
+      for (let n = 0; n < 256; n++) {
+        let c = n;
+        for (let k = 0; k < 8; k++) {
+          c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        }
+        table[n] = c >>> 0;
+      }
+      return table;
+    })();
+
+    function crc32(bytes) {
+      let crc = 0xFFFFFFFF;
+      for (let i = 0; i < bytes.length; i++) {
+        crc = CRC_TABLE[(crc ^ bytes[i]) & 0xFF] ^ (crc >>> 8);
+      }
+      return (crc ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    function xmlEscape(text) {
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function excelTabName(name) {
+      // Excel tab rules: 1–31 chars, none of []:*?/\
+      const cleaned = String(name || 'Batch').replace(/[\[\]:*?/\\]/g, ' ').replace(/\s+/g, ' ').trim();
+      return cleaned.slice(0, 31) || 'Batch';
+    }
+
+    function columnLetter(index) {
+      let letter = '';
+      let n = index;
+      do {
+        letter = String.fromCharCode(65 + (n % 26)) + letter;
+        n = Math.floor(n / 26) - 1;
+      } while (n >= 0);
+      return letter;
+    }
+
+    function cellXml(ref, value) {
+      if (typeof value === 'number' && isFinite(value)) {
+        return '<c r="' + ref + '"><v>' + value + '</v></c>';
+      }
+      const text = (value == null) ? '' : String(value);
+      if (text === '') {
+        return '<c r="' + ref + '"/>';
+      }
+      return '<c r="' + ref + '" t="inlineStr"><is><t xml:space="preserve">' +
+        xmlEscape(text) + '</t></is></c>';
+    }
+
+    function worksheetXml(columns, rows) {
+      const grid = [columns].concat(rows);
+      let body = '';
+      for (let r = 0; r < grid.length; r++) {
+        const cells = grid[r];
+        body += '<row r="' + (r + 1) + '">';
+        for (let c = 0; c < cells.length; c++) {
+          body += cellXml(columnLetter(c) + (r + 1), cells[c]);
+        }
+        body += '</row>';
+      }
+      return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+        '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' +
+        '<sheetData>' + body + '</sheetData></worksheet>';
+    }
+
+    function buildXlsx(name, columns, rows) {
+      const tab = excelTabName(name);
+      const parts = [
+        { path: '[Content_Types].xml', data:
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
+          '<Default Extension="xml" ContentType="application/xml"/>' +
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' +
+          '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' +
+          '</Types>' },
+        { path: '_rels/.rels', data:
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' +
+          '</Relationships>' },
+        { path: 'xl/workbook.xml', data:
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" ' +
+          'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+          '<sheets><sheet name="' + xmlEscape(tab) + '" sheetId="1" r:id="rId1"/></sheets></workbook>' },
+        { path: 'xl/_rels/workbook.xml.rels', data:
+          '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' +
+          '</Relationships>' },
+        { path: 'xl/worksheets/sheet1.xml', data: worksheetXml(columns, rows) }
+      ];
+      return zipStore(parts);
+    }
+
+    /** Builds a ZIP with every entry stored (no compression) — enough for Excel. */
+    function zipStore(parts) {
+      const encoder = new TextEncoder();
+      const files = parts.map(function (part) {
+        const data = encoder.encode(part.data);
+        return { nameBytes: encoder.encode(part.path), data: data, crc: crc32(data) };
+      });
+
+      const chunks = [];
+      let offset = 0;
+
+      files.forEach(function (file) {
+        const header = new DataView(new ArrayBuffer(30));
+        header.setUint32(0, 0x04034b50, true);
+        header.setUint16(4, 20, true);              // version needed
+        header.setUint16(6, 0, true);               // flags
+        header.setUint16(8, 0, true);               // method: store
+        header.setUint16(10, 0, true);              // mod time
+        header.setUint16(12, 0x21, true);           // mod date: 1980-01-01
+        header.setUint32(14, file.crc, true);
+        header.setUint32(18, file.data.length, true);
+        header.setUint32(22, file.data.length, true);
+        header.setUint16(26, file.nameBytes.length, true);
+        header.setUint16(28, 0, true);              // extra length
+
+        const headerBytes = new Uint8Array(header.buffer);
+        chunks.push(headerBytes, file.nameBytes, file.data);
+
+        file.offset = offset;
+        offset += headerBytes.length + file.nameBytes.length + file.data.length;
+      });
+
+      const central = [];
+      files.forEach(function (file) {
+        const entry = new DataView(new ArrayBuffer(46));
+        entry.setUint32(0, 0x02014b50, true);
+        entry.setUint16(4, 20, true);               // version made by
+        entry.setUint16(6, 20, true);               // version needed
+        entry.setUint16(8, 0, true);                // flags
+        entry.setUint16(10, 0, true);               // method
+        entry.setUint16(12, 0, true);               // time
+        entry.setUint16(14, 0x21, true);            // date
+        entry.setUint32(16, file.crc, true);
+        entry.setUint32(20, file.data.length, true);
+        entry.setUint32(24, file.data.length, true);
+        entry.setUint16(28, file.nameBytes.length, true);
+        entry.setUint16(30, 0, true);               // extra length
+        entry.setUint16(32, 0, true);               // comment length
+        entry.setUint16(34, 0, true);               // disk number
+        entry.setUint16(36, 0, true);               // internal attrs
+        entry.setUint32(38, 0, true);               // external attrs
+        entry.setUint32(42, file.offset, true);     // local header offset
+
+        central.push(new Uint8Array(entry.buffer), file.nameBytes);
+      });
+
+      const centralStart = offset;
+      let centralSize = 0;
+      central.forEach(function (part) { centralSize += part.length; });
+
+      const end = new DataView(new ArrayBuffer(22));
+      end.setUint32(0, 0x06054b50, true);
+      end.setUint16(4, 0, true);
+      end.setUint16(6, 0, true);
+      end.setUint16(8, files.length, true);
+      end.setUint16(10, files.length, true);
+      end.setUint32(12, centralSize, true);
+      end.setUint32(16, centralStart, true);
+      end.setUint16(20, 0, true);
+
+      const all = chunks.concat(central);
+      all.push(new Uint8Array(end.buffer));
+
+      return new Blob(all, {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+    }
+
+    els.batchCurrent.addEventListener('click', toggleBatchList);
+
+    els.batchList.addEventListener('click', function (event) {
+      const target = event.target.closest('[data-act]');
+      if (!target) {
+        return;
+      }
+
+      const id = target.dataset.id;
+
+      switch (target.dataset.act) {
+        case 'select':
+          selectBatch(id);
+          break;
+        case 'ask-resolve':
+          confirmingId = id;
+          renderBatchList();
+          break;
+        case 'cancel-resolve':
+          confirmingId = null;
+          renderBatchList();
+          break;
+        case 'do-resolve':
+          confirmingId = null;
+          markResolved(id);
+          break;
+        case 'unresolve':
+          markUnresolved(id);
+          break;
+        case 'export':
+          exportBatch(id);
+          break;
+        case 'toggle-resolved':
+          showResolved = !showResolved;
+          renderBatchList();
+          break;
+      }
+    });
+
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !els.batchList.hidden) {
+        closeBatchList();
+        els.batchCurrent.focus();
+      }
+    });
+
+    // Capture phase, deliberately. The list's own handler re-renders the rows,
+    // which detaches the element that was clicked — so on the bubble phase
+    // contains(event.target) would be false for a click that really was inside,
+    // and every in-list action would close the dropdown behind itself.
+    document.addEventListener('click', function (event) {
+      if (!els.batchList.hidden && !els.batchZone.contains(event.target)) {
+        closeBatchList();
+      }
+    }, true);
+
+    // ===================================================================
+    // STATUS
+    // ===================================================================
+
+    function setStatus(message, tone) {
+      els.status.textContent = message;
+      els.status.className = 'status' + (tone ? ' is-' + tone : '');
+    }
+
+    function storeBatches(list, retention) {
+      if (typeof retention === 'number' && retention > 0) {
+        retentionDays = retention;
+        writeValue(RETENTION_KEY, String(retention));
+      }
+      if (Array.isArray(list)) {
+        writeStore(BATCHES_KEY, list);
+      }
+      render();
+    }
+
+    async function refreshBatches() {
+      if (!isConfigured() || !navigator.onLine) {
+        return;
+      }
+      try {
+        const response = await fetch(GAS_URL, { method: 'GET' });
+        const data = await response.json();
+        if (data && data.status === 'success') {
+          storeBatches(data.batches, data.retentionDays);
+        }
+      } catch (err) {
+        // Keep showing the last known figures rather than blanking them out.
+      }
+    }
+
+    // ===================================================================
+    // STARTUP
+    // ===================================================================
+
+    els.date.value = toLocalISODate(startOfToday());
+
+    const savedRetention = Number(localStorage.getItem(RETENTION_KEY));
+    if (isFinite(savedRetention) && savedRetention > 0) {
+      retentionDays = savedRetention;
+    }
+
+    if (!isConfigured()) {
+      els.banner.hidden = false;
+    }
+
+    render();
+    refreshBatches();
+    flushQueue();
+
+    window.addEventListener('online', function () {
+      refreshBatches();
+      flushQueue();
+    });
+
+    window.addEventListener('offline', function () {
+      const pending = readStore(QUEUE_KEY).length;
+      if (pending) {
+        setStatus('Offline — ' + describe(pending) + ' waiting to sync.', 'warn');
+      }
+    });
+
+    if ('serviceWorker' in navigator &&
+        (location.protocol === 'https:' || location.hostname === 'localhost')) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').catch(function () {
+          // Offline queueing still works without it; only the shell cache is lost.
+        });
+      });
+    }
+  </script>
+</body>
+</html>
