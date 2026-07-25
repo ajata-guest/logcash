@@ -45,14 +45,18 @@
       min-height: 100vh;
       padding: max(24px, env(safe-area-inset-top)) 20px calc(28px + env(safe-area-inset-bottom));
       display: flex;
-      justify-content: center;
+      flex-direction: column;
+      align-items: center;
     }
 
-    /* Top-aligned column: opening the entry panel grows the page downwards
-       instead of re-centring everything and shifting the mic under the thumb. */
+    /* margin:auto centres the column vertically when it fits, filling the tall
+       empty space on a phone. When the panel (and keyboard) make it taller than
+       the screen, the auto margins collapse to 0 so it pins to the top and
+       scrolls normally, instead of clipping the way justify-content:center would. */
     .app {
       width: 100%;
       max-width: 360px;
+      margin: auto 0;
       display: flex;
       flex-direction: column;
       align-items: center;
