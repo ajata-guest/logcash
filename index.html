@@ -396,26 +396,83 @@
       display: none;
     }
 
-    .batch-list {
-      position: absolute;
-      top: calc(100% + 8px);
-      left: 0;
-      right: 0;
-      z-index: 20;
-      margin: 0;
-      padding: 6px;
-      list-style: none;
-      max-height: 264px;
-      overflow-y: auto;
+    /* ---------- batch popup ---------- */
+
+    .batch-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      background: rgba(0, 0, 0, 0.6);
+      animation: fade 0.16s ease-out;
+    }
+
+    .batch-overlay[hidden] {
+      display: none;
+    }
+
+    @keyframes fade {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    .batch-modal {
+      position: fixed;
+      z-index: 41;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: calc(100% - 40px);
+      max-width: 360px;
+      max-height: 75vh;
+      display: flex;
+      flex-direction: column;
       background: var(--surface);
       border: 1px solid var(--line);
-      border-radius: 12px;
-      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+      border-radius: var(--radius);
+      box-shadow: 0 16px 48px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
       animation: rise 0.16s ease-out;
     }
 
-    .batch-list[hidden] {
+    .batch-modal[hidden] {
       display: none;
+    }
+
+    .batch-modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 8px 14px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .batch-modal-title {
+      font-size: 15px;
+      font-weight: 600;
+    }
+
+    .batch-modal-close {
+      width: 34px;
+      height: 34px;
+      border: none;
+      border-radius: 8px;
+      background: none;
+      color: var(--text-dim);
+      font-size: 18px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .batch-modal-close:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    .batch-list {
+      margin: 0;
+      padding: 8px;
+      list-style: none;
+      overflow-y: auto;
     }
 
     .batch-row {
@@ -673,6 +730,28 @@
       color: var(--danger);
     }
 
+    /* Undo pill under the status line — appears after any reversible change. */
+    .undo-btn {
+      margin-top: 2px;
+      padding: 7px 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: var(--surface);
+      color: var(--accent);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .undo-btn:hover {
+      background: var(--surface-2);
+    }
+
+    .undo-btn[hidden] {
+      display: none;
+    }
+
     .banner {
       width: 100%;
       padding: 12px 14px;
@@ -734,6 +813,7 @@
         </svg>
       </button>
       <p class="status" id="status" role="status" aria-live="polite">Tap to speak…</p>
+      <button type="button" class="undo-btn" id="undo-btn" hidden>↩ Undo</button>
     </div>
 
     <section class="panel" id="entry-panel" aria-labelledby="panel-title" hidden>
@@ -796,8 +876,19 @@
            launch does not flash the empty-state button before data arrives. -->
       <div class="batch-loading" id="batch-loading" hidden>Loading…</div>
 
-      <ul class="batch-list" id="batch-list" aria-label="Cash batches" hidden></ul>
+    </div>
 
+    <!-- The batch list is a centred popup, not a dropdown anchored to the bar,
+         so it never runs off the bottom of the screen however many batches. -->
+    <div class="batch-overlay" id="batch-overlay" hidden></div>
+    <div class="batch-modal" id="batch-modal" role="dialog" aria-modal="true"
+         aria-label="Cash batches" hidden>
+      <div class="batch-modal-head">
+        <span class="batch-modal-title">Cash batches</span>
+        <button type="button" class="batch-modal-close" id="batch-modal-close"
+                aria-label="Close">✕</button>
+      </div>
+      <ul class="batch-list" id="batch-list"></ul>
     </div>
 
   </main>
@@ -849,8 +940,14 @@
       batchEmpty: document.getElementById('batch-empty'),
       batchLoading: document.getElementById('batch-loading'),
       batchList: document.getElementById('batch-list'),
-      batchZone: document.getElementById('batch-zone')
+      batchZone: document.getElementById('batch-zone'),
+      batchOverlay: document.getElementById('batch-overlay'),
+      batchModal: document.getElementById('batch-modal'),
+      batchModalClose: document.getElementById('batch-modal-close'),
+      undoBtn: document.getElementById('undo-btn')
     };
+
+    let lastUndo = null;
 
     // minimumFractionDigits 0 so whole amounts read "₹9,750" rather than
     // "₹9,750.00"; paise still show when there are any.
@@ -1179,9 +1276,43 @@
 
       return {
         date: date.formattedDate,
+        dateRecognized: date.index >= 0,
         amount: amount ? amount.value : null,
         description: buildDescription(remaining)
       };
+    }
+
+    /**
+     * The speech engine returns several candidate transcripts, best-confidence
+     * first. We can't stop it merging "2000 23" into "2023", but we can look past
+     * its top guess: prefer the highest-confidence candidate that parses into a
+     * *complete* entry — one with both an amount and a real date — since that is
+     * almost always the one the speaker actually meant. Falls back to the top
+     * guess when none is more complete, so it never does worse than before.
+     */
+    function chooseBestParse(transcripts) {
+      const parsed = transcripts.map(function (t) {
+        return { transcript: t, parse: parseTranscript(t) };
+      });
+
+      const complete = function (p) { return p.parse.amount !== null && p.parse.dateRecognized; };
+      const hasAmount = function (p) { return p.parse.amount !== null; };
+
+      // 1. Top guess already complete — trust the engine's best.
+      if (complete(parsed[0])) {
+        return parsed[0];
+      }
+      // 2. A lower-ranked candidate that is complete (amount + date).
+      const betterComplete = parsed.filter(complete)[0];
+      if (betterComplete) {
+        return betterComplete;
+      }
+      // 3. Top guess if it at least has an amount.
+      if (hasAmount(parsed[0])) {
+        return parsed[0];
+      }
+      // 4. Any candidate with an amount, else just the top guess.
+      return parsed.filter(hasAmount)[0] || parsed[0];
     }
 
     // ===================================================================
@@ -1196,7 +1327,9 @@
       recognition.lang = 'en-IN';
       recognition.interimResults = false;
       recognition.continuous = false;
-      recognition.maxAlternatives = 1;
+      // Ask for several candidate transcripts so chooseBestParse can pick the
+      // one that reads as a complete cash entry, not just the top guess.
+      recognition.maxAlternatives = 6;
 
       recognition.onstart = function () {
         isListening = true;
@@ -1226,10 +1359,16 @@
       };
 
       recognition.onresult = function (event) {
-        const transcript = event.results[0][0].transcript;
-        const parsed = parseTranscript(transcript);
+        const result = event.results[0];
+        const transcripts = [];
+        for (let i = 0; i < result.length; i++) {
+          transcripts.push(result[i].transcript);
+        }
 
-        setStatus('Heard: "' + transcript + '"');
+        const best = chooseBestParse(transcripts);
+        const parsed = best.parse;
+
+        setStatus('Heard: "' + best.transcript + '"');
 
         openPanel('disbursement', {
           date: parsed.date,
@@ -1377,6 +1516,8 @@
         description: pendingType === 'batch' ? '' : description
       };
 
+      const today = toLocalISODate(startOfToday());
+
       if (pendingType === 'batch') {
         // A blank name falls back to the date-based default so a batch is never
         // nameless. The server applies the same fallback.
@@ -1389,6 +1530,20 @@
 
       closePanel();
       enqueue(entry);
+
+      if (pendingType === 'batch') {
+        // Undo a just-created batch by soft-deleting it (recoverable in turn).
+        recordUndo(
+          { id: newId(), type: 'delete', batchId: entry.id, date: today },
+          entry.name + ' removed.'
+        );
+      } else {
+        // Undo a logged entry by removing that one row and recomputing balances.
+        recordUndo(
+          { id: newId(), type: 'deleteEntry', entryRef: entry.id, batchId: entry.batchId, amount: amount, date: today },
+          'Entry removed.'
+        );
+      }
     });
 
     // ===================================================================
@@ -1610,8 +1765,13 @@
           return;
         }
 
+        // Delete/restore are applied in queue order, so the last one wins.
         if (entry.type === 'delete') {
           deleted[entry.batchId] = true;
+          return;
+        }
+        if (entry.type === 'restore') {
+          delete deleted[entry.batchId];
           return;
         }
 
@@ -1636,6 +1796,12 @@
             batch.opening = entry.amount;
             batch.balance = round2(entry.amount - batch.spent);
           }
+
+        } else if (entry.type === 'deleteEntry') {
+          // Reverse one logged entry: put its amount back, drop it from the count.
+          batch.balance = round2(batch.balance + (entry.amount || 0));
+          batch.spent = round2(Math.max(0, batch.spent - (entry.amount || 0)));
+          batch.entries = Math.max(0, batch.entries - 1);
 
         } else {
           batch.spent = round2(batch.spent + entry.amount);
@@ -2085,12 +2251,17 @@
 
     // ---------- dropdown ----------
 
+    function batchListOpen() {
+      return !els.batchModal.hidden;
+    }
+
     function openBatchList() {
       confirmingId = null;
       editingId = null;
       deletingId = null;
       renderBatchList();
-      els.batchList.hidden = false;
+      els.batchOverlay.hidden = false;
+      els.batchModal.hidden = false;
       els.batchCurrent.setAttribute('aria-expanded', 'true');
     }
 
@@ -2099,15 +2270,16 @@
       editingId = null;
       deletingId = null;
       showResolved = false;
-      els.batchList.hidden = true;
+      els.batchOverlay.hidden = true;
+      els.batchModal.hidden = true;
       els.batchCurrent.setAttribute('aria-expanded', 'false');
     }
 
     function toggleBatchList() {
-      if (els.batchList.hidden) {
-        openBatchList();
-      } else {
+      if (batchListOpen()) {
         closeBatchList();
+      } else {
+        openBatchList();
       }
     }
 
@@ -2139,12 +2311,18 @@
         localStorage.removeItem(SELECTED_KEY);
       }
 
+      const today = toLocalISODate(startOfToday());
       enqueue({
         id: newId(),
         type: 'resolve',
         batchId: id,
-        date: toLocalISODate(startOfToday())
+        date: today
       });
+
+      recordUndo(
+        { id: newId(), type: 'unresolve', batchId: id, date: today },
+        batch.name + ' reopened.'
+      );
 
       setStatus(batch.name + ' resolved — it leaves the sheet in ' + retentionDays + ' days.', 'success');
     }
@@ -2186,6 +2364,10 @@
       const nameChanged = name !== batch.name;
       const amountChanged = round2(amount) !== round2(batch.opening);
 
+      // Captured before the change so undo can put them back.
+      const oldName = batch.name;
+      const oldOpening = batch.opening;
+
       editingId = null;
 
       if (!nameChanged && !amountChanged) {
@@ -2193,14 +2375,20 @@
         return;
       }
 
+      const today = toLocalISODate(startOfToday());
       enqueue({
         id: newId(),
         type: 'editBatch',
         batchId: id,
         name: name,
         amount: amount,
-        date: toLocalISODate(startOfToday())
+        date: today
       });
+
+      recordUndo(
+        { id: newId(), type: 'editBatch', batchId: id, name: oldName, amount: oldOpening, date: today },
+        'Edit undone.'
+      );
 
       const parts = [];
       if (nameChanged) parts.push('renamed to ' + name);
@@ -2214,18 +2402,26 @@
         return;
       }
 
-      // A deleted batch must not stay selected.
-      if (localStorage.getItem(SELECTED_KEY) === id) {
+      // Capture selection before clearing it, so undo can re-select the batch.
+      const wasSelected = localStorage.getItem(SELECTED_KEY) === id;
+      if (wasSelected) {
         localStorage.removeItem(SELECTED_KEY);
       }
 
       deletingId = null;
+      const today = toLocalISODate(startOfToday());
       enqueue({
         id: newId(),
         type: 'delete',
         batchId: id,
-        date: toLocalISODate(startOfToday())
+        date: today
       });
+
+      recordUndo(
+        { id: newId(), type: 'restore', batchId: id, date: today },
+        batch.name + ' restored.',
+        wasSelected ? id : ''
+      );
 
       setStatus(batch.name + ' deleted.', 'success');
     }
@@ -2511,6 +2707,8 @@
     }
 
     els.batchCurrent.addEventListener('click', toggleBatchList);
+    els.batchOverlay.addEventListener('click', closeBatchList);
+    els.batchModalClose.addEventListener('click', closeBatchList);
 
     els.batchList.addEventListener('click', function (event) {
       const target = event.target.closest('[data-act]');
@@ -2609,21 +2807,16 @@
     });
 
     document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape' && !els.batchList.hidden) {
+      if (event.key === 'Escape' && batchListOpen()) {
         closeBatchList();
         els.batchCurrent.focus();
       }
     });
 
-    // Capture phase, deliberately. The list's own handler re-renders the rows,
-    // which detaches the element that was clicked — so on the bubble phase
-    // contains(event.target) would be false for a click that really was inside,
-    // and every in-list action would close the dropdown behind itself.
-    document.addEventListener('click', function (event) {
-      if (!els.batchList.hidden && !els.batchZone.contains(event.target)) {
-        closeBatchList();
-      }
-    }, true);
+    // The popup's dimmed overlay handles click-to-dismiss, so no document-level
+    // click-outside listener is needed anymore.
+
+    els.undoBtn.addEventListener('click', doUndo);
 
     // ===================================================================
     // STATUS
@@ -2632,6 +2825,36 @@
     function setStatus(message, tone) {
       els.status.textContent = message;
       els.status.className = 'status' + (tone ? ' is-' + tone : '');
+    }
+
+    // ---------- single-level undo ----------
+
+    // Records how to reverse the change just made. `inverse` is a queue entry
+    // that undoes it; `message` is shown after undoing; `reselect` (optional) is
+    // a batch id to make active again on undo. Replaces any previous undo — only
+    // the most recent change can be reversed.
+    function recordUndo(inverse, message, reselect) {
+      lastUndo = { inverse: inverse, message: message, reselect: reselect || '' };
+      els.undoBtn.hidden = false;
+    }
+
+    function clearUndo() {
+      lastUndo = null;
+      els.undoBtn.hidden = true;
+    }
+
+    function doUndo() {
+      if (!lastUndo) {
+        return;
+      }
+      const undo = lastUndo;
+      clearUndo();
+      closeBatchList();
+      if (undo.reselect) {
+        writeValue(SELECTED_KEY, undo.reselect);
+      }
+      enqueue(undo.inverse);
+      setStatus(undo.message || 'Change undone.', 'success');
     }
 
     function storeBatches(list, retention) {
