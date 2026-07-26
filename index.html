@@ -520,6 +520,10 @@
       color: #ffffff;
     }
 
+    .confirm-yes.danger {
+      background: var(--danger);
+    }
+
     .batch-divider {
       margin: 6px 4px 2px;
       padding-top: 8px;
@@ -638,6 +642,35 @@
     .edit-input:focus {
       outline: none;
       border-color: var(--accent);
+    }
+
+    /* Second edit field sits below the first inside the editor. */
+    .batch-edit .edit-label + .edit-input {
+      margin-bottom: 4px;
+    }
+    .batch-edit .edit-input + .edit-label {
+      margin-top: 10px;
+    }
+
+    /* Destructive, and set apart from Save/Cancel by a divider above it. */
+    .edit-delete {
+      display: block;
+      width: 100%;
+      margin-top: 12px;
+      padding: 9px;
+      border: none;
+      border-top: 1px solid var(--line);
+      border-radius: 0;
+      background: none;
+      color: var(--danger-soft);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .edit-delete:hover {
+      color: var(--danger);
     }
 
     .banner {
@@ -842,6 +875,7 @@
     let showResolved = false;
     let confirmingId = null;
     let editingId = null;
+    let deletingId = null;
     let retentionDays = 15;
 
     // Stays false until the first server reply (or a definite "cannot fetch"),
@@ -1552,6 +1586,8 @@
 
       const created = [];
 
+      const deleted = {};
+
       readStore(QUEUE_KEY).forEach(function (entry) {
         if (entry.type === 'batch') {
           if (byId[entry.id]) {
@@ -1574,6 +1610,11 @@
           return;
         }
 
+        if (entry.type === 'delete') {
+          deleted[entry.batchId] = true;
+          return;
+        }
+
         const batch = byId[entry.batchId];
         if (!batch) {
           return;
@@ -1586,8 +1627,15 @@
         } else if (entry.type === 'unresolve') {
           batch.resolvedOn = '';
 
-        } else if (entry.type === 'rename') {
-          batch.name = entry.name;
+        } else if (entry.type === 'editBatch' || entry.type === 'rename') {
+          if (entry.name) {
+            batch.name = entry.name;
+          }
+          // A new opening shifts every balance by the delta; spends are untouched.
+          if (entry.amount != null) {
+            batch.opening = entry.amount;
+            batch.balance = round2(entry.amount - batch.spent);
+          }
 
         } else {
           batch.spent = round2(batch.spent + entry.amount);
@@ -1599,8 +1647,10 @@
         }
       });
 
-      // Newest first: batches queued locally are the most recent of all.
-      return created.concat(stored);
+      // Newest first; a batch with a queued delete is hidden immediately.
+      return created.concat(stored).filter(function (batch) {
+        return !deleted[batch.id];
+      });
     }
 
     function qualifies(batch) {
@@ -1711,14 +1761,14 @@
       return button;
     }
 
-    function renameButton(batch) {
+    function editButton(batch) {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'opt-rename';
-      button.dataset.act = 'ask-rename';
+      button.dataset.act = 'ask-edit';
       button.dataset.id = batch.id;
-      button.title = 'Rename batch';
-      button.setAttribute('aria-label', 'Rename ' + batch.name);
+      button.title = 'Edit batch';
+      button.setAttribute('aria-label', 'Edit ' + batch.name);
       button.innerHTML =
         '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" ' +
         'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -1751,28 +1801,46 @@
       resolve.setAttribute('aria-label', 'Mark ' + batch.name + ' as resolved');
 
       row.appendChild(option);
-      row.appendChild(renameButton(batch));
+      row.appendChild(editButton(batch));
       row.appendChild(exportButton(batch));
       row.appendChild(resolve);
       return row;
+    }
+
+    function editField(labelText, role, value, opts) {
+      const wrap = document.createDocumentFragment();
+
+      const label = document.createElement('label');
+      label.className = 'edit-label';
+      label.textContent = labelText;
+      label.setAttribute('for', role);
+
+      const input = document.createElement('input');
+      input.id = role;
+      input.className = 'edit-input';
+      input.value = value;
+      input.dataset.role = role;
+      if (opts && opts.numeric) {
+        input.type = 'number';
+        input.step = '0.01';
+        input.min = '0';
+        input.inputMode = 'decimal';
+      } else {
+        input.type = 'text';
+        input.maxLength = 60;
+      }
+
+      wrap.appendChild(label);
+      wrap.appendChild(input);
+      return wrap;
     }
 
     function editRow(batch) {
       const row = document.createElement('li');
       row.className = 'batch-edit';
 
-      const label = document.createElement('label');
-      label.className = 'edit-label';
-      label.setAttribute('for', 'rename-input');
-      label.textContent = 'Rename batch';
-
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.id = 'rename-input';
-      input.className = 'edit-input';
-      input.maxLength = 60;
-      input.value = batch.name;
-      input.dataset.role = 'rename-input';
+      row.appendChild(editField('Batch name', 'edit-name', batch.name));
+      row.appendChild(editField('Opening amount (₹)', 'edit-amount', batch.opening));
 
       const buttons = document.createElement('span');
       buttons.className = 'confirm-row';
@@ -1780,20 +1848,64 @@
       const no = document.createElement('button');
       no.type = 'button';
       no.className = 'confirm-no';
-      no.dataset.act = 'cancel-rename';
+      no.dataset.act = 'cancel-edit';
       no.textContent = 'Cancel';
 
       const yes = document.createElement('button');
       yes.type = 'button';
       yes.className = 'confirm-yes';
-      yes.dataset.act = 'do-rename';
+      yes.dataset.act = 'do-edit';
       yes.dataset.id = batch.id;
       yes.textContent = 'Save';
 
       buttons.appendChild(no);
       buttons.appendChild(yes);
-      row.appendChild(label);
-      row.appendChild(input);
+      row.appendChild(buttons);
+
+      // Delete lives inside the editor, visually separated, so it is a
+      // deliberate second step rather than a button next to Resolve.
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'edit-delete';
+      del.dataset.act = 'ask-delete';
+      del.dataset.id = batch.id;
+      del.textContent = 'Delete this batch';
+      row.appendChild(del);
+
+      return row;
+    }
+
+    function deleteConfirmRow(batch) {
+      const row = document.createElement('li');
+      row.className = 'batch-confirm';
+
+      const text = document.createElement('span');
+      text.className = 'confirm-text';
+      const n = batch.entries;
+      text.textContent = 'Delete ' + batch.name + ' and ' +
+        (n ? ('all ' + n + (n === 1 ? ' entry' : ' entries')) : 'its opening row') +
+        '? This removes it from the sheet for good and cannot be undone.';
+
+      const buttons = document.createElement('span');
+      buttons.className = 'confirm-row';
+
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'confirm-no';
+      no.dataset.act = 'cancel-delete';
+      no.dataset.id = batch.id;
+      no.textContent = 'Cancel';
+
+      const yes = document.createElement('button');
+      yes.type = 'button';
+      yes.className = 'confirm-yes danger';
+      yes.dataset.act = 'do-delete';
+      yes.dataset.id = batch.id;
+      yes.textContent = 'Delete';
+
+      buttons.appendChild(no);
+      buttons.appendChild(yes);
+      row.appendChild(text);
       row.appendChild(buttons);
       return row;
     }
@@ -1884,7 +1996,9 @@
 
       visibleBatches.forEach(function (batch) {
         let node;
-        if (editingId === batch.id) {
+        if (deletingId === batch.id) {
+          node = deleteConfirmRow(batch);
+        } else if (editingId === batch.id) {
           node = editRow(batch);
         } else if (confirmingId === batch.id) {
           node = confirmRow(batch);
@@ -1974,6 +2088,7 @@
     function openBatchList() {
       confirmingId = null;
       editingId = null;
+      deletingId = null;
       renderBatchList();
       els.batchList.hidden = false;
       els.batchCurrent.setAttribute('aria-expanded', 'true');
@@ -1982,6 +2097,7 @@
     function closeBatchList() {
       confirmingId = null;
       editingId = null;
+      deletingId = null;
       showResolved = false;
       els.batchList.hidden = true;
       els.batchCurrent.setAttribute('aria-expanded', 'false');
@@ -2049,7 +2165,7 @@
       setStatus(batch.name + ' reopened.', 'success');
     }
 
-    function renameBatch(id, rawName) {
+    function saveEdit(id, rawName, rawAmount) {
       const batch = findBatch(id);
       if (!batch) {
         return;
@@ -2060,22 +2176,62 @@
         setStatus('A batch name cannot be empty.', 'error');
         return;
       }
-      if (name === batch.name) {
-        editingId = null;
+
+      const amount = Number(rawAmount);
+      if (!isFinite(amount) || amount <= 0) {
+        setStatus('The opening amount must be greater than zero.', 'error');
+        return;
+      }
+
+      const nameChanged = name !== batch.name;
+      const amountChanged = round2(amount) !== round2(batch.opening);
+
+      editingId = null;
+
+      if (!nameChanged && !amountChanged) {
         renderBatchList();
         return;
       }
 
-      editingId = null;
       enqueue({
         id: newId(),
-        type: 'rename',
+        type: 'editBatch',
         batchId: id,
         name: name,
+        amount: amount,
         date: toLocalISODate(startOfToday())
       });
 
-      setStatus('Renamed to ' + name + '.', 'success');
+      const parts = [];
+      if (nameChanged) parts.push('renamed to ' + name);
+      if (amountChanged) parts.push('opening set to ' + rupees.format(amount));
+      setStatus(capitalise(parts.join(', ')) + '.', 'success');
+    }
+
+    function deleteBatch(id) {
+      const batch = findBatch(id);
+      if (!batch) {
+        return;
+      }
+
+      // A deleted batch must not stay selected.
+      if (localStorage.getItem(SELECTED_KEY) === id) {
+        localStorage.removeItem(SELECTED_KEY);
+      }
+
+      deletingId = null;
+      enqueue({
+        id: newId(),
+        type: 'delete',
+        batchId: id,
+        date: toLocalISODate(startOfToday())
+      });
+
+      setStatus(batch.name + ' deleted.', 'success');
+    }
+
+    function capitalise(text) {
+      return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
     }
 
     // ---------- export one batch as .xlsx ----------
@@ -2386,21 +2542,35 @@
         case 'export':
           exportBatch(id);
           break;
-        case 'ask-rename':
+        case 'ask-edit':
           confirmingId = null;
+          deletingId = null;
           editingId = id;
           renderBatchList();
-          focusRenameInput();
+          focusEditInput();
           break;
-        case 'cancel-rename':
+        case 'cancel-edit':
           editingId = null;
           renderBatchList();
           break;
-        case 'do-rename': {
-          const input = target.closest('.batch-edit').querySelector('[data-role="rename-input"]');
-          renameBatch(id, input ? input.value : '');
+        case 'do-edit':
+          saveEdit(id, editInputValue('edit-name'), editInputValue('edit-amount'));
           break;
-        }
+        case 'ask-delete':
+          editingId = null;
+          deletingId = id;
+          renderBatchList();
+          break;
+        case 'cancel-delete':
+          deletingId = null;
+          // Return to the editor the delete was launched from.
+          editingId = id;
+          renderBatchList();
+          focusEditInput();
+          break;
+        case 'do-delete':
+          deleteBatch(id);
+          break;
         case 'toggle-resolved':
           showResolved = !showResolved;
           renderBatchList();
@@ -2408,23 +2578,28 @@
       }
     });
 
-    function focusRenameInput() {
-      const input = els.batchList.querySelector('[data-role="rename-input"]');
+    function editInputValue(role) {
+      const input = els.batchList.querySelector('[data-role="' + role + '"]');
+      return input ? input.value : '';
+    }
+
+    function focusEditInput() {
+      const input = els.batchList.querySelector('[data-role="edit-name"]');
       if (input) {
         input.focus();
         input.select();
       }
     }
 
-    // Enter saves the rename, Escape cancels — without closing the dropdown.
+    // Enter saves the edit, Escape cancels — without closing the dropdown.
     els.batchList.addEventListener('keydown', function (event) {
-      const input = event.target.closest('[data-role="rename-input"]');
+      const input = event.target.closest('[data-role="edit-name"], [data-role="edit-amount"]');
       if (!input) {
         return;
       }
       if (event.key === 'Enter') {
         event.preventDefault();
-        renameBatch(editingId, input.value);
+        saveEdit(editingId, editInputValue('edit-name'), editInputValue('edit-amount'));
       } else if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
