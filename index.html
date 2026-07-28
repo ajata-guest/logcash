@@ -967,6 +967,10 @@
     });
 
     let pendingType = 'disbursement';
+    // True while the new-batch name is still the auto date-based default, so
+    // changing the date keeps the name in step. Cleared once the user types a
+    // name of their own.
+    let batchNameAuto = false;
     let isListening = false;
     let isFlushing = false;
 
@@ -1439,6 +1443,10 @@
       els.description.value = values.description || '';
       els.name.value = values.name || '';
 
+      // A fresh batch opens with the auto name, so let the date drive it until
+      // the user renames it themselves.
+      batchNameAuto = (type === 'batch');
+
       clearPanelError();
       els.panel.hidden = false;
       els.save.disabled = false;
@@ -1473,6 +1481,21 @@
       closePanel();
       setStatus('Tap to speak…');
     });
+
+    // Once the user edits the name, stop auto-syncing it from the date.
+    els.name.addEventListener('input', function () {
+      batchNameAuto = false;
+    });
+
+    // Keep the auto name in step with the chosen date (both events, since date
+    // pickers fire 'change' while typing fires 'input').
+    function syncBatchNameToDate() {
+      if (pendingType === 'batch' && batchNameAuto) {
+        els.name.value = defaultBatchName(els.date.value || toLocalISODate(startOfToday()));
+      }
+    }
+    els.date.addEventListener('change', syncBatchNameToDate);
+    els.date.addEventListener('input', syncBatchNameToDate);
 
     function startNewBatch() {
       // Replaces the old prompt(): same panel, so a batch can be backdated and
