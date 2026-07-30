@@ -678,30 +678,51 @@
       display: none;
     }
 
-    /* Inline rename, same footprint as the resolve confirmation. */
+    /* The list switches to this focused form when editing or deleting a batch,
+       so the form owns the whole popup body instead of squeezing between rows. */
+    .batch-list.is-focused {
+      padding: 18px;
+    }
+
     .batch-edit {
-      padding: 10px 12px;
-      border-radius: 8px;
-      background: var(--surface-2);
+      text-align: left;
+    }
+
+    .edit-caption {
+      margin: 0 0 16px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+
+    .edit-caption.strong {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .edit-warning {
+      margin: 0 0 18px;
+      font-size: 14px;
+      line-height: 1.5;
+      color: var(--text-dim);
     }
 
     .edit-label {
       display: block;
       margin-bottom: 6px;
-      font-size: 12px;
+      font-size: 13px;
       color: var(--text-dim);
-      text-align: left;
     }
 
     .edit-input {
       width: 100%;
-      padding: 9px 10px;
+      padding: 12px;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--surface);
+      border-radius: 8px;
+      background: var(--surface-2);
       color: var(--text);
       font-family: inherit;
-      font-size: 15px;
+      font-size: 16px; /* 16px keeps iOS from zooming the field on focus */
     }
 
     .edit-input:focus {
@@ -709,33 +730,52 @@
       border-color: var(--accent);
     }
 
-    /* Second edit field sits below the first inside the editor. */
-    .batch-edit .edit-label + .edit-input {
-      margin-bottom: 4px;
+    /* type=number is only for the numeric keypad — drop the up/down spinner
+       arrows, which are clutter for a cash amount (applies to every number
+       field, including the main entry panel's Amount). */
+    input[type="number"] {
+      -moz-appearance: textfield;
+      appearance: textfield;
     }
-    .batch-edit .edit-input + .edit-label {
-      margin-top: 10px;
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
     }
 
-    /* Destructive, and set apart from Save/Cancel by a divider above it. */
+    .batch-edit .edit-input + .edit-label {
+      margin-top: 14px;
+    }
+
+    .edit-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    /* Destructive, set well apart from Save/Cancel by a divider above it. */
     .edit-delete {
       display: block;
       width: 100%;
-      margin-top: 12px;
-      padding: 9px;
+      margin-top: 18px;
+      padding: 14px 9px 4px;
       border: none;
       border-top: 1px solid var(--line);
-      border-radius: 0;
       background: none;
       color: var(--danger-soft);
       font-family: inherit;
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
       cursor: pointer;
     }
 
     .edit-delete:hover {
       color: var(--danger);
+    }
+
+    .action-btn.danger {
+      background: var(--danger);
+      color: #ffffff;
     }
 
     /* Undo pill under the status line — appears after any reversible change. */
@@ -892,7 +932,7 @@
     <div class="batch-modal" id="batch-modal" role="dialog" aria-modal="true"
          aria-label="Cash batches" hidden>
       <div class="batch-modal-head">
-        <span class="batch-modal-title">Cash batches</span>
+        <span class="batch-modal-title" id="batch-modal-title">Cash batches</span>
         <button type="button" class="batch-modal-close" id="batch-modal-close"
                 aria-label="Close">✕</button>
       </div>
@@ -951,6 +991,7 @@
       batchZone: document.getElementById('batch-zone'),
       batchOverlay: document.getElementById('batch-overlay'),
       batchModal: document.getElementById('batch-modal'),
+      batchModalTitle: document.getElementById('batch-modal-title'),
       batchModalClose: document.getElementById('batch-modal-close'),
       undoBtn: document.getElementById('undo-btn')
     };
@@ -2036,21 +2077,27 @@
       const row = document.createElement('li');
       row.className = 'batch-edit';
 
-      row.appendChild(editField('Batch name', 'edit-name', batch.name));
-      row.appendChild(editField('Opening amount (₹)', 'edit-amount', batch.opening));
+      // A quiet caption confirms which batch is open, beyond the editable name.
+      const caption = document.createElement('p');
+      caption.className = 'edit-caption';
+      caption.textContent = rupees.format(batch.balance) + ' left · ' + describe(batch.entries);
+      row.appendChild(caption);
 
-      const buttons = document.createElement('span');
-      buttons.className = 'confirm-row';
+      row.appendChild(editField('Batch name', 'edit-name', batch.name));
+      row.appendChild(editField('Opening amount (₹)', 'edit-amount', batch.opening, { numeric: true }));
+
+      const buttons = document.createElement('div');
+      buttons.className = 'edit-actions';
 
       const no = document.createElement('button');
       no.type = 'button';
-      no.className = 'confirm-no';
+      no.className = 'action-btn secondary';
       no.dataset.act = 'cancel-edit';
       no.textContent = 'Cancel';
 
       const yes = document.createElement('button');
       yes.type = 'button';
-      yes.className = 'confirm-yes';
+      yes.className = 'action-btn primary';
       yes.dataset.act = 'do-edit';
       yes.dataset.id = batch.id;
       yes.textContent = 'Save';
@@ -2059,8 +2106,7 @@
       buttons.appendChild(yes);
       row.appendChild(buttons);
 
-      // Delete lives inside the editor, visually separated, so it is a
-      // deliberate second step rather than a button next to Resolve.
+      // Delete sits below a divider — a deliberate second step, not a peer of Save.
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'edit-delete';
@@ -2074,35 +2120,41 @@
 
     function deleteConfirmRow(batch) {
       const row = document.createElement('li');
-      row.className = 'batch-confirm';
+      row.className = 'batch-edit batch-delete-confirm';
 
-      const text = document.createElement('span');
-      text.className = 'confirm-text';
+      const heading = document.createElement('p');
+      heading.className = 'edit-caption strong';
+      heading.textContent = 'Delete ' + batch.name + '?';
+      row.appendChild(heading);
+
+      const text = document.createElement('p');
+      text.className = 'edit-warning';
       const n = batch.entries;
-      text.textContent = 'Delete ' + batch.name + ' and ' +
-        (n ? ('all ' + n + (n === 1 ? ' entry' : ' entries')) : 'its opening row') +
-        '? This removes it from the sheet for good and cannot be undone.';
+      const what = n > 1 ? ('all ' + n + ' entries')
+        : n === 1 ? 'its 1 entry'
+        : 'its opening row';
+      text.textContent = 'This removes ' + what + ' from the sheet for good and cannot be undone.';
+      row.appendChild(text);
 
-      const buttons = document.createElement('span');
-      buttons.className = 'confirm-row';
+      const buttons = document.createElement('div');
+      buttons.className = 'edit-actions';
 
       const no = document.createElement('button');
       no.type = 'button';
-      no.className = 'confirm-no';
+      no.className = 'action-btn secondary';
       no.dataset.act = 'cancel-delete';
       no.dataset.id = batch.id;
       no.textContent = 'Cancel';
 
       const yes = document.createElement('button');
       yes.type = 'button';
-      yes.className = 'confirm-yes danger';
+      yes.className = 'action-btn danger';
       yes.dataset.act = 'do-delete';
       yes.dataset.id = batch.id;
       yes.textContent = 'Delete';
 
       buttons.appendChild(no);
       buttons.appendChild(yes);
-      row.appendChild(text);
       row.appendChild(buttons);
       return row;
     }
@@ -2179,8 +2231,33 @@
       return row;
     }
 
+    function setModalTitle(text) {
+      els.batchModalTitle.textContent = text;
+    }
+
     function renderBatchList() {
       els.batchList.textContent = '';
+
+      // Focused views: editing or confirming a delete takes over the whole popup
+      // so a form is never wedged between the other rows. Cancel returns here.
+      const editing = editingId ? findBatch(editingId) : null;
+      if (editing) {
+        setModalTitle('Edit batch');
+        els.batchList.classList.add('is-focused');
+        els.batchList.appendChild(editRow(editing));
+        return;
+      }
+
+      const deleting = deletingId ? findBatch(deletingId) : null;
+      if (deleting) {
+        setModalTitle('Delete batch');
+        els.batchList.classList.add('is-focused');
+        els.batchList.appendChild(deleteConfirmRow(deleting));
+        return;
+      }
+
+      setModalTitle('Cash batches');
+      els.batchList.classList.remove('is-focused');
 
       if (!batches.length) {
         els.batchList.appendChild(noteRow('No cash batches yet.'));
@@ -2192,17 +2269,9 @@
       }
 
       visibleBatches.forEach(function (batch) {
-        let node;
-        if (deletingId === batch.id) {
-          node = deleteConfirmRow(batch);
-        } else if (editingId === batch.id) {
-          node = editRow(batch);
-        } else if (confirmingId === batch.id) {
-          node = confirmRow(batch);
-        } else {
-          node = batchRow(batch);
-        }
-        els.batchList.appendChild(node);
+        els.batchList.appendChild(
+          confirmingId === batch.id ? confirmRow(batch) : batchRow(batch)
+        );
       });
 
       // Resolved batches stay out of the list proper, but remain recoverable
