@@ -500,6 +500,10 @@
       font-family: inherit;
       cursor: pointer;
       text-align: left;
+      /* A long-press must not select the label text or pop the OS callout. */
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
     }
 
     .batch-option:hover {
@@ -2811,6 +2815,12 @@
     els.batchModalClose.addEventListener('click', closeBatchList);
 
     els.batchList.addEventListener('click', function (event) {
+      // A long-press already handled this touch; swallow the click it spawns.
+      if (suppressNextClick) {
+        suppressNextClick = false;
+        return;
+      }
+
       const target = event.target.closest('[data-act]');
       if (!target) {
         return;
@@ -2855,16 +2865,23 @@
           saveEdit(id, editInputValue('edit-name'), editInputValue('edit-amount'));
           break;
         case 'ask-delete':
+          // Reached from inside the editor, so Cancel should go back there.
+          deleteReturnsToEdit = true;
           editingId = null;
           deletingId = id;
           renderBatchList();
           break;
         case 'cancel-delete':
           deletingId = null;
-          // Return to the editor the delete was launched from.
-          editingId = id;
-          renderBatchList();
-          focusEditInput();
+          if (deleteReturnsToEdit) {
+            editingId = id;
+            renderBatchList();
+            focusEditInput();
+          } else {
+            // Reached via long-press, so Cancel returns to the list.
+            renderBatchList();
+          }
+          deleteReturnsToEdit = false;
           break;
         case 'do-delete':
           deleteBatch(id);
@@ -2875,6 +2892,56 @@
           break;
       }
     });
+
+    // Long-press a batch row to jump straight to its delete confirmation.
+    let suppressNextClick = false;
+    let deleteReturnsToEdit = false;
+    let pressTimer = null;
+    let pressStart = null;
+
+    els.batchList.addEventListener('pointerdown', function (event) {
+      const option = event.target.closest('.batch-option[data-act="select"]');
+      if (!option) {
+        return;
+      }
+      const id = option.dataset.id;
+      pressStart = { x: event.clientX, y: event.clientY };
+      clearTimeout(pressTimer);
+      pressTimer = setTimeout(function () {
+        pressTimer = null;
+        suppressNextClick = true;
+        // In case the browser fires no trailing click, don't strand the flag.
+        setTimeout(function () { suppressNextClick = false; }, 700);
+        if (navigator.vibrate) {
+          try { navigator.vibrate(18); } catch (e) { /* not supported */ }
+        }
+        confirmingId = null;
+        editingId = null;
+        deleteReturnsToEdit = false;
+        deletingId = id;
+        renderBatchList();
+      }, 500);
+    });
+
+    // Any movement past a small threshold means a scroll, not a press-and-hold.
+    els.batchList.addEventListener('pointermove', function (event) {
+      if (pressTimer && pressStart) {
+        const dx = event.clientX - pressStart.x;
+        const dy = event.clientY - pressStart.y;
+        if (Math.hypot(dx, dy) > 10) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+      }
+    });
+
+    function cancelPress() {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+    els.batchList.addEventListener('pointerup', cancelPress);
+    els.batchList.addEventListener('pointercancel', cancelPress);
+    els.batchList.addEventListener('pointerleave', cancelPress);
 
     function editInputValue(role) {
       const input = els.batchList.querySelector('[data-role="' + role + '"]');
