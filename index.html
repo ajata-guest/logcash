@@ -965,6 +965,13 @@
     // without an entry, even if money is left in it.
     const ACTIVE_WINDOW_DAYS = 10;
 
+    // Apps Script latency is wildly variable, so cap a single attempt and retry.
+    // A retry is safe: the server de-duplicates by entry id, so an entry that
+    // actually landed during a slow request is never written twice.
+    const POST_TIMEOUT_MS = 30000;
+    const RETRY_DELAY_MS = 12000;
+    let retryTimer = null;
+
     const els = {
       banner: document.getElementById('config-banner'),
       balanceValue: document.getElementById('balance-value'),
@@ -1613,12 +1620,15 @@
           { id: newId(), type: 'delete', batchId: entry.id, date: today },
           entry.name + ' removed.'
         );
+        // Optimistic: it is saved on-device and shown; the sheet syncs behind it.
+        setStatus(entry.name + ' started.', 'success');
       } else {
         // Undo a logged entry by removing that one row and recomputing balances.
         recordUndo(
           { id: newId(), type: 'deleteEntry', entryRef: entry.id, batchId: entry.batchId, amount: amount, date: today },
           'Entry removed.'
         );
+        setStatus('Saved.', 'success');
       }
     });
 
@@ -1669,31 +1679,46 @@
     }
 
     async function postEntry(entry) {
-      // No Content-Type header on purpose. Setting one makes this a non-simple
-      // CORS request, and Apps Script cannot answer the preflight that follows.
-      const response = await fetch(GAS_URL, {
-        method: 'POST',
-        body: JSON.stringify(entry)
-      });
-
-      if (!response.ok) {
-        throw new Error('HTTP ' + response.status);
-      }
-
-      const text = await response.text();
+      // Abort a request that hangs past the cap so it retries instead of the
+      // browser holding it open for a minute or more.
+      const controller = new AbortController();
+      const timer = setTimeout(function () { controller.abort(); }, POST_TIMEOUT_MS);
 
       try {
-        return JSON.parse(text);
-      } catch (err) {
-        // Almost always a Google sign-in page: the deployment is not public.
-        throw new Error('Unexpected response — check the deployment is set to "Anyone".');
+        // No Content-Type header on purpose. Setting one makes this a non-simple
+        // CORS request, and Apps Script cannot answer the preflight that follows.
+        const response = await fetch(GAS_URL, {
+          method: 'POST',
+          body: JSON.stringify(entry),
+          signal: controller.signal
+        });
+
+        if (!response.ok) {
+          throw new Error('HTTP ' + response.status);
+        }
+
+        const text = await response.text();
+        try {
+          return JSON.parse(text);
+        } catch (err) {
+          // Almost always a Google sign-in page: the deployment is not public.
+          throw new Error('Unexpected response — check the deployment is set to "Anyone".');
+        }
+      } finally {
+        clearTimeout(timer);
       }
+    }
+
+    function scheduleRetry() {
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(function () { flushQueue(); }, RETRY_DELAY_MS);
     }
 
     async function flushQueue() {
       if (isFlushing) {
         return;
       }
+      clearTimeout(retryTimer);
 
       if (!isConfigured()) {
         els.banner.hidden = false;
@@ -1720,26 +1745,33 @@
             break;
           }
 
-          setStatus(queue.length > 1 ? 'Syncing ' + describe(queue.length) + '…' : 'Saving…');
-
           let result;
           try {
             result = await postEntry(queue[0]);
           } catch (err) {
-            // Network or transport failure: keep the entry and retry later.
-            setStatus('Not saved yet — ' + describe(queue.length) + ' waiting. Will retry.', 'warn');
+            // Slow, aborted, or dropped: keep the entry and retry on a timer.
+            // The optimistic "Saved" already stands; this only nudges if stuck.
+            setStatus('Still syncing ' + describe(queue.length) + ' in the background…', 'warn');
+            scheduleRetry();
             break;
           }
 
           if (result && result.status === 'success') {
+            // Happy path stays silent: the entry's own "Saved" message holds and
+            // the balance note counts down the backlog, so a slow sync is
+            // invisible rather than a lingering "Saving…".
             shiftQueue();
             storeBatches(result.batches, result.retentionDays);
-            const left = readStore(QUEUE_KEY).length;
-            setStatus(left ? 'Synced. ' + describe(left) + ' left…' : 'Saved.', 'success');
+
+          } else if (result && result.retriable) {
+            // Transient (server busy): keep it and try again shortly.
+            setStatus('Server busy — still syncing ' + describe(queue.length) + '…', 'warn');
+            scheduleRetry();
+            break;
 
           } else {
-            // The server rejected it outright, so retrying cannot help. Park it
-            // where it can still be recovered instead of blocking the queue.
+            // A genuine rejection: retrying cannot help. Park it where it can
+            // still be recovered instead of blocking the queue.
             const rejected = readStore(REJECTED_KEY);
             rejected.push({ entry: queue[0], message: result && result.message, at: new Date().toISOString() });
             writeStore(REJECTED_KEY, rejected);
@@ -2344,7 +2376,9 @@
       const rejected = readStore(REJECTED_KEY).length;
 
       if (pending) {
-        notes.push(describe(pending) + ' not yet synced');
+        notes.push(navigator.onLine
+          ? describe(pending) + ' syncing…'
+          : describe(pending) + ' waiting to sync');
       }
       if (rejected) {
         notes.push(rejected + ' rejected');
