@@ -587,6 +587,11 @@
       color: var(--text-dim);
     }
 
+    /* A batch running low on its own gets an amber balance in the list. */
+    .batch-option.is-low .opt-balance {
+      color: var(--amber-text);
+    }
+
     .opt-resolve,
     .opt-export,
     .opt-rename {
@@ -847,6 +852,10 @@
       font-family: inherit;
       cursor: pointer;
       text-align: left;
+      /* A long-press to delete must not select text or pop the OS callout. */
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
     }
 
     .entry-open:hover {
@@ -1247,6 +1256,7 @@
     let detailError = '';
     let entryEditRef = null;     // entry being edited
     let entryDeleteRef = null;   // entry pending a delete confirm
+    let entryDeleteFromEdit = false; // true if the delete was launched from the edit form
 
     // Stays false until the first server reply (or a definite "cannot fetch"),
     // so a fresh launch shows "Loading…" rather than flashing the empty state.
@@ -2273,7 +2283,9 @@
       // The whole row now opens the batch's detail screen; its actions live there.
       const option = document.createElement('button');
       option.type = 'button';
-      option.className = 'batch-option has-chevron' + (batch.balance <= 0 ? ' is-spent' : '');
+      const state = batch.balance <= 0 ? ' is-spent'
+        : (batch.balance < LOW_CASH_THRESHOLD ? ' is-low' : '');
+      option.className = 'batch-option has-chevron' + state;
       option.dataset.act = 'open-detail';
       option.dataset.id = batch.id;
       if (activeBatch && activeBatch.id === batch.id) {
@@ -2840,10 +2852,11 @@
         notes.push(rupees.format(round2(total)) + ' across ' + funded.length + ' batches');
       }
 
-      // Refill reminder: total across every open batch, low once under the
-      // threshold. Only meaningful once at least one batch exists.
-      const openTotal = visibleBatches.reduce(function (sum, batch) { return sum + batch.balance; }, 0);
-      const isLow = visibleBatches.length > 0 && openTotal < LOW_CASH_THRESHOLD;
+      // Refill reminder, per batch: the card shows the active batch, so it goes
+      // amber when THAT batch is under the threshold (but still in the black —
+      // an overdrawn batch is already flagged red).
+      const bal = activeBatch ? activeBatch.balance : null;
+      const isLow = bal !== null && bal >= 0 && bal < LOW_CASH_THRESHOLD;
       els.balanceCard.classList.toggle('is-low', isLow);
       els.balanceLow.hidden = !isLow;
 
@@ -2877,6 +2890,7 @@
       detailError = '';
       entryEditRef = null;
       entryDeleteRef = null;
+      entryDeleteFromEdit = false;
     }
 
     function openBatchList() {
@@ -2906,8 +2920,11 @@
     // Header back arrow: step one screen out (entry → detail → list).
     function stepBack() {
       if (entryDeleteRef) {
-        entryEditRef = entryDeleteRef;
+        // From the edit form → back to editing; from a long-press → the list.
+        const back = entryDeleteRef;
         entryDeleteRef = null;
+        entryEditRef = entryDeleteFromEdit ? back : null;
+        entryDeleteFromEdit = false;
         renderBatchList();
       } else if (entryEditRef) {
         entryEditRef = null;
@@ -3004,6 +3021,7 @@
       detailError = '';
       entryEditRef = null;
       entryDeleteRef = null;
+      entryDeleteFromEdit = false;
       renderBatchList();
     }
 
@@ -3581,16 +3599,22 @@
           );
           break;
         case 'ask-entry-delete':
+          entryDeleteFromEdit = true; // launched from the edit form
           entryDeleteRef = entryEditRef;
           entryEditRef = null;
           renderBatchList();
           break;
-        case 'cancel-entry-delete':
-          entryEditRef = entryDeleteRef; // back to editing that entry
+        case 'cancel-entry-delete': {
+          const back = entryDeleteRef;
           entryDeleteRef = null;
+          // From the edit form → back to editing; from a long-press → the list.
+          entryEditRef = entryDeleteFromEdit ? back : null;
+          entryDeleteFromEdit = false;
           renderBatchList();
           break;
+        }
         case 'do-entry-delete':
+          entryDeleteFromEdit = false;
           deleteEntryFromDetail(entryDeleteRef);
           break;
       }
@@ -3602,11 +3626,14 @@
     let pressStart = null;
 
     els.batchList.addEventListener('pointerdown', function (event) {
-      const option = event.target.closest('.batch-option[data-act="open-detail"]');
-      if (!option) {
+      // Long-press a batch row → its delete confirm; a detail entry → its delete.
+      const batchOpt = event.target.closest('.batch-option[data-act="open-detail"]');
+      const entryOpt = event.target.closest('.entry-open[data-act="edit-entry"]');
+      if (!batchOpt && !entryOpt) {
         return;
       }
-      const id = option.dataset.id;
+      const batchId = batchOpt ? batchOpt.dataset.id : null;
+      const entryRef = entryOpt ? entryOpt.dataset.ref : null;
       pressStart = { x: event.clientX, y: event.clientY };
       clearTimeout(pressTimer);
       pressTimer = setTimeout(function () {
@@ -3617,9 +3644,15 @@
         if (navigator.vibrate) {
           try { navigator.vibrate(18); } catch (e) { /* not supported */ }
         }
-        confirmingId = null;
-        editingId = null;
-        deletingId = id;
+        if (entryOpt) {
+          entryEditRef = null;
+          entryDeleteFromEdit = false; // Cancel returns to the entries list
+          entryDeleteRef = entryRef;
+        } else {
+          confirmingId = null;
+          editingId = null;
+          deletingId = batchId;
+        }
         renderBatchList();
       }, 500);
     });
