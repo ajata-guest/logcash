@@ -771,6 +771,19 @@
       margin-bottom: 10px;
     }
 
+    /* Green "Batch Active" status badge (a disabled button, shown at full green). */
+    .detail-loghere.is-active-badge {
+      background: var(--success);
+      color: #08350f;
+      opacity: 1;
+      cursor: default;
+    }
+
+    .detail-retry {
+      width: 100%;
+      margin-top: 4px;
+    }
+
     .detail-actions {
       display: flex;
       gap: 8px;
@@ -2585,16 +2598,22 @@
         rupees.format(batch.balance) + ' left';
       wrap.appendChild(caption);
 
-      // Primary: make this the batch new entries log into.
+      // Primary: make this the batch new entries log into. When it already is
+      // the active batch, it becomes a green "Batch Active" status badge.
+      const isActive = Boolean(activeBatch && activeBatch.id === batch.id);
       const logHere = document.createElement('button');
       logHere.type = 'button';
-      logHere.className = 'action-btn primary detail-loghere';
       logHere.dataset.act = 'log-here';
       logHere.dataset.id = batch.id;
-      logHere.textContent = (activeBatch && activeBatch.id === batch.id)
-        ? 'Active — logging here'
-        : 'Log entries here';
-      logHere.disabled = Boolean(activeBatch && activeBatch.id === batch.id);
+      if (isActive) {
+        logHere.className = 'action-btn detail-loghere is-active-badge';
+        logHere.textContent = 'Batch Active';
+        logHere.disabled = true;
+      } else {
+        logHere.className = 'action-btn primary detail-loghere';
+        logHere.textContent = 'Enter Batch';
+        logHere.disabled = false;
+      }
       wrap.appendChild(logHere);
 
       // Secondary actions.
@@ -2616,6 +2635,13 @@
         wrap.appendChild(detailNote('Loading entries…'));
       } else if (detailError) {
         wrap.appendChild(detailNote(detailError));
+        const retry = document.createElement('button');
+        retry.type = 'button';
+        retry.className = 'action-btn secondary detail-retry';
+        retry.dataset.act = 'retry-entries';
+        retry.dataset.id = batch.id;
+        retry.textContent = 'Retry';
+        wrap.appendChild(retry);
       } else if (detailData && detailData.entries.length) {
         const list = document.createElement('ul');
         list.className = 'entry-list';
@@ -2940,10 +2966,15 @@
       detailLoading = true;
       renderBatchList();
 
+      // Cap the request so a slow/cold mobile call can't hang on "Loading…"
+      // forever — it fails cleanly and offers a Retry instead.
+      const controller = new AbortController();
+      const timer = setTimeout(function () { controller.abort(); }, POST_TIMEOUT_MS);
+
       try {
         const url = GAS_URL + (GAS_URL.indexOf('?') === -1 ? '?' : '&') +
           'action=entries&batchId=' + encodeURIComponent(id);
-        const response = await fetch(url, { method: 'GET' });
+        const response = await fetch(url, { method: 'GET', signal: controller.signal });
         const data = await response.json();
         if (detailId !== id) {
           return; // user navigated away while loading
@@ -2957,8 +2988,9 @@
         if (detailId !== id) {
           return;
         }
-        detailError = 'Could not load entries — check the connection.';
+        detailError = 'Could not load entries — the connection is slow or dropped.';
       } finally {
+        clearTimeout(timer);
         if (detailId === id) {
           detailLoading = false;
           renderBatchList();
@@ -3484,6 +3516,9 @@
           break;
 
         // ---- batch detail actions ----
+        case 'retry-entries':
+          openBatchDetail(id);
+          break;
         case 'log-here':
           selectBatch(id);
           break;
