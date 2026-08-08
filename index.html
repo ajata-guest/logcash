@@ -26,6 +26,11 @@
       --warn: #ffd60a;
       --success: #30d158;
 
+      /* Amber "running low" accents — warmer and calmer than the yellow --warn. */
+      --amber: #ff9f0a;
+      --amber-text: #ffb454;
+      --amber-bg: rgba(255, 159, 10, 0.10);
+
       --radius: 14px;
     }
 
@@ -72,6 +77,30 @@
       border-radius: var(--radius);
       padding: 16px 18px;
       text-align: center;
+      transition: border-color 0.3s ease, background-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    /* Running-low state: a calm amber wash, not an alarm. */
+    .balance.is-low {
+      border-color: var(--amber);
+      background: var(--amber-bg);
+      box-shadow: 0 6px 22px rgba(255, 159, 10, 0.16);
+    }
+
+    .balance.is-low .balance-value {
+      color: var(--amber-text);
+    }
+
+    .balance-low {
+      display: block;
+      margin-top: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--amber-text);
+    }
+
+    .balance-low[hidden] {
+      display: none;
     }
 
     .balance-label {
@@ -476,6 +505,28 @@
       color: var(--text);
     }
 
+    .batch-modal-back {
+      width: 34px;
+      height: 34px;
+      margin-right: 4px;
+      border: none;
+      border-radius: 8px;
+      background: none;
+      color: var(--text-dim);
+      font-size: 26px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .batch-modal-back:hover {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    .batch-modal-back[hidden] {
+      display: none;
+    }
+
     .batch-list {
       margin: 0;
       padding: 8px;
@@ -504,6 +555,23 @@
       -webkit-user-select: none;
       user-select: none;
       -webkit-touch-callout: none;
+    }
+
+    .batch-option.has-chevron {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .opt-main {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .opt-chevron {
+      flex-shrink: 0;
+      display: flex;
+      color: var(--text-dim);
     }
 
     .batch-option:hover {
@@ -692,6 +760,116 @@
       text-align: left;
     }
 
+    /* ---------- batch detail screen ---------- */
+
+    .batch-detail {
+      text-align: left;
+    }
+
+    .detail-loghere {
+      width: 100%;
+      margin-bottom: 10px;
+    }
+
+    .detail-actions {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 18px;
+    }
+
+    .detail-action {
+      flex: 1;
+      padding: 9px 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface-2);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .detail-action:hover {
+      background: var(--line);
+    }
+
+    .detail-action.danger {
+      color: var(--danger-soft);
+    }
+
+    .detail-entries-head {
+      margin: 0 0 6px;
+      font-size: 12px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .detail-note {
+      margin: 8px 0;
+      font-size: 13px;
+      color: var(--text-dim);
+      text-align: center;
+    }
+
+    .entry-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .entry-row + .entry-row {
+      border-top: 1px solid var(--line);
+    }
+
+    .entry-open {
+      display: block;
+      width: 100%;
+      padding: 11px 6px;
+      background: none;
+      border: none;
+      border-radius: 8px;
+      color: var(--text);
+      font-family: inherit;
+      cursor: pointer;
+      text-align: left;
+    }
+
+    .entry-open:hover {
+      background: var(--surface-2);
+    }
+
+    .entry-top {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .entry-desc {
+      flex: 1;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 15px;
+    }
+
+    .entry-amt {
+      flex-shrink: 0;
+      font-size: 15px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .entry-date {
+      display: block;
+      margin-top: 2px;
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
     .edit-caption {
       margin: 0 0 16px;
       font-size: 13px;
@@ -848,10 +1026,11 @@
       Apps Script web app URL. Until then, nothing can be saved.
     </p>
 
-    <section class="balance" aria-labelledby="balance-label">
+    <section class="balance" id="balance-card" aria-labelledby="balance-label">
       <span class="balance-label" id="balance-label">Cash in hand</span>
       <span class="balance-value" id="balance-value">—</span>
       <span class="balance-note" id="balance-note"></span>
+      <span class="balance-low" id="balance-low" hidden>⚠ Running low — refill soon</span>
     </section>
 
     <div class="mic-wrap">
@@ -936,6 +1115,8 @@
     <div class="batch-modal" id="batch-modal" role="dialog" aria-modal="true"
          aria-label="Cash batches" hidden>
       <div class="batch-modal-head">
+        <button type="button" class="batch-modal-back" id="batch-modal-back"
+                aria-label="Back" hidden>‹</button>
         <span class="batch-modal-title" id="batch-modal-title">Cash batches</span>
         <button type="button" class="batch-modal-close" id="batch-modal-close"
                 aria-label="Close">✕</button>
@@ -965,6 +1146,10 @@
     // without an entry, even if money is left in it.
     const ACTIVE_WINDOW_DAYS = 10;
 
+    // When the total across all open batches drops below this, the balance card
+    // shifts to a "running low" amber state as a refill reminder.
+    const LOW_CASH_THRESHOLD = 10000;
+
     // Apps Script latency is wildly variable, so cap a single attempt and retry.
     // A retry is safe: the server de-duplicates by entry id, so an entry that
     // actually landed during a slow request is never written twice.
@@ -974,6 +1159,8 @@
 
     const els = {
       banner: document.getElementById('config-banner'),
+      balanceCard: document.getElementById('balance-card'),
+      balanceLow: document.getElementById('balance-low'),
       balanceValue: document.getElementById('balance-value'),
       balanceNote: document.getElementById('balance-note'),
       mic: document.getElementById('mic-btn'),
@@ -1004,6 +1191,7 @@
       batchModal: document.getElementById('batch-modal'),
       batchModalTitle: document.getElementById('batch-modal-title'),
       batchModalClose: document.getElementById('batch-modal-close'),
+      batchModalBack: document.getElementById('batch-modal-back'),
       undoBtn: document.getElementById('undo-btn')
     };
 
@@ -1038,6 +1226,14 @@
     let editingId = null;
     let deletingId = null;
     let retentionDays = 15;
+
+    // Batch detail screen (review/edit/delete individual entries).
+    let detailId = null;         // batch whose entries are open
+    let detailData = null;       // { name, opening, balance, entries:[{ref,date,amount,description}] }
+    let detailLoading = false;
+    let detailError = '';
+    let entryEditRef = null;     // entry being edited
+    let entryDeleteRef = null;   // entry pending a delete confirm
 
     // Stays false until the first server reply (or a definite "cannot fetch"),
     // so a fresh launch shows "Loading…" rather than flashing the empty state.
@@ -1911,6 +2107,12 @@
           batch.spent = round2(Math.max(0, batch.spent - (entry.amount || 0)));
           batch.entries = Math.max(0, batch.entries - 1);
 
+        } else if (entry.type === 'editEntry') {
+          // Only the delta between old and new amount moves the batch total.
+          const delta = (entry.amount || 0) - (entry.oldAmount || 0);
+          batch.spent = round2(batch.spent + delta);
+          batch.balance = round2(batch.balance - delta);
+
         } else {
           batch.spent = round2(batch.spent + entry.amount);
           batch.balance = round2(batch.balance - entry.amount);
@@ -2055,29 +2257,30 @@
       const row = document.createElement('li');
       row.className = 'batch-row';
 
+      // The whole row now opens the batch's detail screen; its actions live there.
       const option = document.createElement('button');
       option.type = 'button';
-      option.className = 'batch-option' + (batch.balance <= 0 ? ' is-spent' : '');
-      option.dataset.act = 'select';
+      option.className = 'batch-option has-chevron' + (batch.balance <= 0 ? ' is-spent' : '');
+      option.dataset.act = 'open-detail';
       option.dataset.id = batch.id;
       if (activeBatch && activeBatch.id === batch.id) {
         option.setAttribute('aria-current', 'true');
       }
-      option.appendChild(optionBody(batch.name, rupees.format(batch.balance), describeBatch(batch)));
 
-      const resolve = document.createElement('button');
-      resolve.type = 'button';
-      resolve.className = 'opt-resolve';
-      resolve.dataset.act = 'ask-resolve';
-      resolve.dataset.id = batch.id;
-      resolve.textContent = '✓';
-      resolve.title = 'Mark resolved';
-      resolve.setAttribute('aria-label', 'Mark ' + batch.name + ' as resolved');
+      const main = document.createElement('span');
+      main.className = 'opt-main';
+      main.appendChild(optionBody(batch.name, rupees.format(batch.balance), describeBatch(batch)));
 
+      const chevron = document.createElement('span');
+      chevron.className = 'opt-chevron';
+      chevron.setAttribute('aria-hidden', 'true');
+      chevron.innerHTML =
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+        'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"></polyline></svg>';
+
+      option.appendChild(main);
+      option.appendChild(chevron);
       row.appendChild(option);
-      row.appendChild(editButton(batch));
-      row.appendChild(exportButton(batch));
-      row.appendChild(resolve);
       return row;
     }
 
@@ -2099,6 +2302,8 @@
         input.step = '0.01';
         input.min = '0';
         input.inputMode = 'decimal';
+      } else if (opts && opts.date) {
+        input.type = 'date';
       } else {
         input.type = 'text';
         input.maxLength = 60;
@@ -2274,8 +2479,28 @@
     function renderBatchList() {
       els.batchList.textContent = '';
 
-      // Focused views: editing or confirming a delete takes over the whole popup
-      // so a form is never wedged between the other rows. Cancel returns here.
+      // The header back arrow appears on any sub-screen (detail or deeper).
+      els.batchModalBack.hidden = !(entryEditRef || entryDeleteRef ||
+        editingId || deletingId || confirmingId || detailId);
+
+      // Each focused screen takes over the whole popup body; Cancel/back steps
+      // one level out. Order = deepest screen first.
+
+      // ---- single-entry screens (inside a batch's detail) ----
+      if (detailId && entryEditRef) {
+        setModalTitle('Edit entry');
+        els.batchList.classList.add('is-focused');
+        els.batchList.appendChild(entryEditScreen());
+        return;
+      }
+      if (detailId && entryDeleteRef) {
+        setModalTitle('Delete entry');
+        els.batchList.classList.add('is-focused');
+        els.batchList.appendChild(entryDeleteConfirm());
+        return;
+      }
+
+      // ---- batch action screens (launched from the detail view) ----
       const editing = editingId ? findBatch(editingId) : null;
       if (editing) {
         setModalTitle('Edit batch');
@@ -2283,7 +2508,6 @@
         els.batchList.appendChild(editRow(editing));
         return;
       }
-
       const deleting = deletingId ? findBatch(deletingId) : null;
       if (deleting) {
         setModalTitle('Delete batch');
@@ -2291,7 +2515,26 @@
         els.batchList.appendChild(deleteConfirmRow(deleting));
         return;
       }
+      const resolving = confirmingId ? findBatch(confirmingId) : null;
+      if (resolving) {
+        setModalTitle('Resolve batch');
+        els.batchList.classList.add('is-focused');
+        els.batchList.appendChild(confirmRow(resolving));
+        return;
+      }
 
+      // ---- batch detail (entries list) ----
+      const detail = detailId ? findBatch(detailId) : null;
+      if (detail) {
+        setModalTitle(detail.name);
+        els.batchList.classList.add('is-focused');
+        els.batchList.appendChild(batchDetailScreen(detail));
+        return;
+      }
+      detailId = null; // batch vanished (deleted/resolved) — fall back to the list
+
+      // ---- the list ----
+      els.batchModalBack.hidden = true;
       setModalTitle('Cash batches');
       els.batchList.classList.remove('is-focused');
 
@@ -2305,9 +2548,7 @@
       }
 
       visibleBatches.forEach(function (batch) {
-        els.batchList.appendChild(
-          confirmingId === batch.id ? confirmRow(batch) : batchRow(batch)
-        );
+        els.batchList.appendChild(batchRow(batch));
       });
 
       // Resolved batches stay out of the list proper, but remain recoverable
@@ -2320,6 +2561,207 @@
           });
         }
       }
+    }
+
+    // ---------- batch detail screen (review + per-entry edit/delete) ----------
+
+    function detailActionButton(act, id, label, danger) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'detail-action' + (danger ? ' danger' : '');
+      btn.dataset.act = act;
+      btn.dataset.id = id;
+      btn.textContent = label;
+      return btn;
+    }
+
+    function batchDetailScreen(batch) {
+      const wrap = document.createElement('li');
+      wrap.className = 'batch-detail';
+
+      const caption = document.createElement('p');
+      caption.className = 'edit-caption';
+      caption.textContent = rupees.format(batch.opening) + ' opened · ' +
+        rupees.format(batch.balance) + ' left';
+      wrap.appendChild(caption);
+
+      // Primary: make this the batch new entries log into.
+      const logHere = document.createElement('button');
+      logHere.type = 'button';
+      logHere.className = 'action-btn primary detail-loghere';
+      logHere.dataset.act = 'log-here';
+      logHere.dataset.id = batch.id;
+      logHere.textContent = (activeBatch && activeBatch.id === batch.id)
+        ? 'Active — logging here'
+        : 'Log entries here';
+      logHere.disabled = Boolean(activeBatch && activeBatch.id === batch.id);
+      wrap.appendChild(logHere);
+
+      // Secondary actions.
+      const actions = document.createElement('div');
+      actions.className = 'detail-actions';
+      actions.appendChild(detailActionButton('ask-edit', batch.id, 'Edit'));
+      actions.appendChild(detailActionButton('export', batch.id, 'Export'));
+      actions.appendChild(detailActionButton('ask-resolve', batch.id, 'Resolve'));
+      actions.appendChild(detailActionButton('ask-delete', batch.id, 'Delete', true));
+      wrap.appendChild(actions);
+
+      // Entries.
+      const heading = document.createElement('p');
+      heading.className = 'detail-entries-head';
+      heading.textContent = 'Entries';
+      wrap.appendChild(heading);
+
+      if (detailLoading) {
+        wrap.appendChild(detailNote('Loading entries…'));
+      } else if (detailError) {
+        wrap.appendChild(detailNote(detailError));
+      } else if (detailData && detailData.entries.length) {
+        const list = document.createElement('ul');
+        list.className = 'entry-list';
+        detailData.entries.forEach(function (en) {
+          list.appendChild(entryRow(en));
+        });
+        wrap.appendChild(list);
+      } else {
+        wrap.appendChild(detailNote('No entries yet — just the opening.'));
+      }
+
+      if (batch.pending) {
+        wrap.appendChild(detailNote('Unsynced entries may not show until synced.'));
+      }
+
+      return wrap;
+    }
+
+    function detailNote(text) {
+      const p = document.createElement('p');
+      p.className = 'detail-note';
+      p.textContent = text;
+      return p;
+    }
+
+    function entryRow(en) {
+      const row = document.createElement('li');
+      row.className = 'entry-row';
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'entry-open';
+      btn.dataset.act = 'edit-entry';
+      btn.dataset.ref = en.ref;
+
+      const top = document.createElement('span');
+      top.className = 'entry-top';
+      const desc = document.createElement('span');
+      desc.className = 'entry-desc';
+      desc.textContent = en.description || '—';
+      const amt = document.createElement('span');
+      amt.className = 'entry-amt';
+      amt.textContent = rupees.format(Number(en.amount) || 0);
+      top.appendChild(desc);
+      top.appendChild(amt);
+
+      const date = document.createElement('span');
+      date.className = 'entry-date';
+      date.textContent = prettyDate(en.date);
+
+      btn.appendChild(top);
+      btn.appendChild(date);
+      row.appendChild(btn);
+      return row;
+    }
+
+    function currentEntry() {
+      if (!detailData || !entryEditRef) {
+        return null;
+      }
+      return detailData.entries.filter(function (e) { return e.ref === entryEditRef; })[0] || null;
+    }
+
+    function entryEditScreen() {
+      const en = currentEntry();
+      const row = document.createElement('li');
+      row.className = 'batch-edit';
+
+      if (!en) {
+        row.appendChild(detailNote('That entry is no longer here.'));
+        return row;
+      }
+
+      row.appendChild(editField('Description', 'entry-desc', en.description));
+      row.appendChild(editField('Amount (₹)', 'entry-amount', en.amount, { numeric: true }));
+      row.appendChild(editField('Date', 'entry-date-input', en.date, { date: true }));
+
+      const buttons = document.createElement('div');
+      buttons.className = 'edit-actions';
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'action-btn secondary';
+      no.dataset.act = 'cancel-entry-edit';
+      no.textContent = 'Cancel';
+      const yes = document.createElement('button');
+      yes.type = 'button';
+      yes.className = 'action-btn primary';
+      yes.dataset.act = 'save-entry';
+      yes.textContent = 'Save';
+      buttons.appendChild(no);
+      buttons.appendChild(yes);
+      row.appendChild(buttons);
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'edit-delete';
+      del.dataset.act = 'ask-entry-delete';
+      del.textContent = 'Delete this entry';
+      row.appendChild(del);
+
+      return row;
+    }
+
+    function entryDeleteConfirm() {
+      const en = (detailData && detailData.entries.filter(function (e) { return e.ref === entryDeleteRef; })[0]) || null;
+      const row = document.createElement('li');
+      row.className = 'batch-edit batch-delete-confirm';
+
+      const heading = document.createElement('p');
+      heading.className = 'edit-caption strong';
+      heading.textContent = 'Delete this entry?';
+      row.appendChild(heading);
+
+      const text = document.createElement('p');
+      text.className = 'edit-warning';
+      text.textContent = en
+        ? '“' + (en.description || 'entry') + '” · ' + rupees.format(Number(en.amount) || 0) +
+          '. The balances above it recalculate. This can be undone right after.'
+        : 'Remove this entry?';
+      row.appendChild(text);
+
+      const buttons = document.createElement('div');
+      buttons.className = 'edit-actions';
+      const no = document.createElement('button');
+      no.type = 'button';
+      no.className = 'action-btn secondary';
+      no.dataset.act = 'cancel-entry-delete';
+      no.textContent = 'Cancel';
+      const yes = document.createElement('button');
+      yes.type = 'button';
+      yes.className = 'action-btn danger';
+      yes.dataset.act = 'do-entry-delete';
+      yes.textContent = 'Delete';
+      buttons.appendChild(no);
+      buttons.appendChild(yes);
+      row.appendChild(buttons);
+      return row;
+    }
+
+    function prettyDate(iso) {
+      const parts = String(iso || '').split('-');
+      if (parts.length !== 3) {
+        return iso || '';
+      }
+      const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
     function render() {
@@ -2372,6 +2814,13 @@
         notes.push(rupees.format(round2(total)) + ' across ' + funded.length + ' batches');
       }
 
+      // Refill reminder: total across every open batch, low once under the
+      // threshold. Only meaningful once at least one batch exists.
+      const openTotal = visibleBatches.reduce(function (sum, batch) { return sum + batch.balance; }, 0);
+      const isLow = visibleBatches.length > 0 && openTotal < LOW_CASH_THRESHOLD;
+      els.balanceCard.classList.toggle('is-low', isLow);
+      els.balanceLow.hidden = !isLow;
+
       const pending = readStore(QUEUE_KEY).length;
       const rejected = readStore(REJECTED_KEY).length;
 
@@ -2393,10 +2842,19 @@
       return !els.batchModal.hidden;
     }
 
-    function openBatchList() {
+    function resetScreens() {
       confirmingId = null;
       editingId = null;
       deletingId = null;
+      detailId = null;
+      detailData = null;
+      detailError = '';
+      entryEditRef = null;
+      entryDeleteRef = null;
+    }
+
+    function openBatchList() {
+      resetScreens();
       renderBatchList();
       els.batchOverlay.hidden = false;
       els.batchModal.hidden = false;
@@ -2404,9 +2862,7 @@
     }
 
     function closeBatchList() {
-      confirmingId = null;
-      editingId = null;
-      deletingId = null;
+      resetScreens();
       showResolved = false;
       els.batchOverlay.hidden = true;
       els.batchModal.hidden = true;
@@ -2418,6 +2874,27 @@
         closeBatchList();
       } else {
         openBatchList();
+      }
+    }
+
+    // Header back arrow: step one screen out (entry → detail → list).
+    function stepBack() {
+      if (entryDeleteRef) {
+        entryEditRef = entryDeleteRef;
+        entryDeleteRef = null;
+        renderBatchList();
+      } else if (entryEditRef) {
+        entryEditRef = null;
+        renderBatchList();
+      } else if (editingId || deletingId || confirmingId) {
+        editingId = null;
+        deletingId = null;
+        confirmingId = null;
+        renderBatchList();
+      } else if (detailId) {
+        backToList();
+      } else {
+        closeBatchList();
       }
     }
 
@@ -2436,6 +2913,135 @@
       render();
       setStatus('Logging to ' + chosen.name + '.');
       els.batchCurrent.focus();
+    }
+
+    // ---------- batch detail: fetch + edit/delete entries ----------
+
+    async function openBatchDetail(id) {
+      const batch = findBatch(id);
+      if (!batch) {
+        return;
+      }
+      detailId = id;
+      detailData = null;
+      detailError = '';
+      entryEditRef = null;
+      entryDeleteRef = null;
+
+      if (!isConfigured() || !navigator.onLine) {
+        detailLoading = false;
+        detailError = navigator.onLine
+          ? 'Connect a sheet to review entries.'
+          : 'Reviewing entries needs a connection.';
+        renderBatchList();
+        return;
+      }
+
+      detailLoading = true;
+      renderBatchList();
+
+      try {
+        const url = GAS_URL + (GAS_URL.indexOf('?') === -1 ? '?' : '&') +
+          'action=entries&batchId=' + encodeURIComponent(id);
+        const response = await fetch(url, { method: 'GET' });
+        const data = await response.json();
+        if (detailId !== id) {
+          return; // user navigated away while loading
+        }
+        if (data && data.status === 'success') {
+          detailData = data;
+        } else {
+          detailError = (data && data.message) || 'Could not load entries.';
+        }
+      } catch (err) {
+        if (detailId !== id) {
+          return;
+        }
+        detailError = 'Could not load entries — check the connection.';
+      } finally {
+        if (detailId === id) {
+          detailLoading = false;
+          renderBatchList();
+        }
+      }
+    }
+
+    function backToList() {
+      detailId = null;
+      detailData = null;
+      detailError = '';
+      entryEditRef = null;
+      entryDeleteRef = null;
+      renderBatchList();
+    }
+
+    function saveEntry(rawDesc, rawAmount, rawDate) {
+      const en = currentEntry();
+      if (!en) {
+        return;
+      }
+      const description = String(rawDesc || '').trim();
+      const amount = Number(rawAmount);
+      const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : en.date;
+
+      if (!description) {
+        setStatus('Enter a description for the entry.', 'error');
+        return;
+      }
+      if (!isFinite(amount) || amount <= 0) {
+        setStatus('The entry amount must be greater than zero.', 'error');
+        return;
+      }
+
+      const oldAmount = Number(en.amount) || 0;
+      const changed = description !== en.description || round2(amount) !== round2(oldAmount) || date !== en.date;
+
+      entryEditRef = null;
+
+      if (changed) {
+        // Optimistically update the shown entry and the batch aggregate.
+        en.description = description;
+        en.amount = amount;
+        en.date = date;
+
+        enqueue({
+          id: newId(),
+          type: 'editEntry',
+          entryRef: en.ref,
+          batchId: detailId,
+          amount: amount,
+          oldAmount: oldAmount,
+          description: description,
+          date: date
+        });
+        setStatus('Entry updated.', 'success');
+      }
+      renderBatchList();
+    }
+
+    function deleteEntryFromDetail(ref) {
+      const en = detailData && detailData.entries.filter(function (e) { return e.ref === ref; })[0];
+      entryDeleteRef = null;
+      if (!en) {
+        renderBatchList();
+        return;
+      }
+
+      const amount = Number(en.amount) || 0;
+      // Drop it from the shown list; the batch aggregate updates via projection.
+      detailData.entries = detailData.entries.filter(function (e) { return e.ref !== ref; });
+
+      enqueue({
+        id: newId(),
+        type: 'deleteEntry',
+        entryRef: ref,
+        batchId: detailId,
+        amount: amount,
+        date: toLocalISODate(startOfToday())
+      });
+
+      setStatus('Entry deleted.', 'success');
+      renderBatchList();
     }
 
     function markResolved(id) {
@@ -2847,6 +3453,7 @@
     els.batchCurrent.addEventListener('click', toggleBatchList);
     els.batchOverlay.addEventListener('click', closeBatchList);
     els.batchModalClose.addEventListener('click', closeBatchList);
+    els.batchModalBack.addEventListener('click', stepBack);
 
     els.batchList.addEventListener('click', function (event) {
       // A long-press already handled this touch; swallow the click it spawns.
@@ -2861,32 +3468,29 @@
       }
 
       const id = target.dataset.id;
+      const ref = target.dataset.ref;
 
       switch (target.dataset.act) {
-        case 'select':
-          selectBatch(id);
+        // ---- list ----
+        case 'open-detail':
+          openBatchDetail(id);
           break;
-        case 'ask-resolve':
-          confirmingId = id;
+        case 'toggle-resolved':
+          showResolved = !showResolved;
           renderBatchList();
-          break;
-        case 'cancel-resolve':
-          confirmingId = null;
-          renderBatchList();
-          break;
-        case 'do-resolve':
-          confirmingId = null;
-          markResolved(id);
           break;
         case 'unresolve':
           markUnresolved(id);
+          break;
+
+        // ---- batch detail actions ----
+        case 'log-here':
+          selectBatch(id);
           break;
         case 'export':
           exportBatch(id);
           break;
         case 'ask-edit':
-          confirmingId = null;
-          deletingId = null;
           editingId = id;
           renderBatchList();
           focusEditInput();
@@ -2898,43 +3502,72 @@
         case 'do-edit':
           saveEdit(id, editInputValue('edit-name'), editInputValue('edit-amount'));
           break;
+        case 'ask-resolve':
+          confirmingId = id;
+          renderBatchList();
+          break;
+        case 'cancel-resolve':
+          confirmingId = null;
+          renderBatchList();
+          break;
+        case 'do-resolve':
+          confirmingId = null;
+          detailId = null; // batch leaves the open list once resolved
+          markResolved(id);
+          break;
         case 'ask-delete':
-          // Reached from inside the editor, so Cancel should go back there.
-          deleteReturnsToEdit = true;
           editingId = null;
           deletingId = id;
           renderBatchList();
           break;
         case 'cancel-delete':
           deletingId = null;
-          if (deleteReturnsToEdit) {
-            editingId = id;
-            renderBatchList();
-            focusEditInput();
-          } else {
-            // Reached via long-press, so Cancel returns to the list.
-            renderBatchList();
-          }
-          deleteReturnsToEdit = false;
+          renderBatchList(); // back to detail if open, else the list
           break;
         case 'do-delete':
-          deleteBatch(id);
+          deleteBatch(id); // batch vanishes → renderBatchList falls back to list
           break;
-        case 'toggle-resolved':
-          showResolved = !showResolved;
+
+        // ---- single-entry actions ----
+        case 'edit-entry':
+          entryEditRef = ref;
           renderBatchList();
+          focusEntryInput();
+          break;
+        case 'cancel-entry-edit':
+          entryEditRef = null;
+          renderBatchList();
+          break;
+        case 'save-entry':
+          saveEntry(
+            editInputValue('entry-desc'),
+            editInputValue('entry-amount'),
+            editInputValue('entry-date-input')
+          );
+          break;
+        case 'ask-entry-delete':
+          entryDeleteRef = entryEditRef;
+          entryEditRef = null;
+          renderBatchList();
+          break;
+        case 'cancel-entry-delete':
+          entryEditRef = entryDeleteRef; // back to editing that entry
+          entryDeleteRef = null;
+          renderBatchList();
+          break;
+        case 'do-entry-delete':
+          deleteEntryFromDetail(entryDeleteRef);
           break;
       }
     });
 
     // Long-press a batch row to jump straight to its delete confirmation.
     let suppressNextClick = false;
-    let deleteReturnsToEdit = false;
     let pressTimer = null;
     let pressStart = null;
 
     els.batchList.addEventListener('pointerdown', function (event) {
-      const option = event.target.closest('.batch-option[data-act="select"]');
+      const option = event.target.closest('.batch-option[data-act="open-detail"]');
       if (!option) {
         return;
       }
@@ -2951,7 +3584,6 @@
         }
         confirmingId = null;
         editingId = null;
-        deleteReturnsToEdit = false;
         deletingId = id;
         renderBatchList();
       }, 500);
@@ -2990,20 +3622,32 @@
       }
     }
 
-    // Enter saves the edit, Escape cancels — without closing the dropdown.
+    function focusEntryInput() {
+      const input = els.batchList.querySelector('[data-role="entry-desc"]');
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+
+    // Enter saves, Escape steps back — without closing the whole popup.
     els.batchList.addEventListener('keydown', function (event) {
-      const input = event.target.closest('[data-role="edit-name"], [data-role="edit-amount"]');
-      if (!input) {
+      const batchInput = event.target.closest('[data-role="edit-name"], [data-role="edit-amount"]');
+      const entryInput = event.target.closest('[data-role="entry-desc"], [data-role="entry-amount"], [data-role="entry-date-input"]');
+      if (!batchInput && !entryInput) {
         return;
       }
       if (event.key === 'Enter') {
         event.preventDefault();
-        saveEdit(editingId, editInputValue('edit-name'), editInputValue('edit-amount'));
+        if (entryInput) {
+          saveEntry(editInputValue('entry-desc'), editInputValue('entry-amount'), editInputValue('entry-date-input'));
+        } else {
+          saveEdit(editingId, editInputValue('edit-name'), editInputValue('edit-amount'));
+        }
       } else if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        editingId = null;
-        renderBatchList();
+        stepBack();
       }
     });
 
