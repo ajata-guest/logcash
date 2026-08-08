@@ -1,20 +1,24 @@
 /**
  * Cash Logger service worker.
  *
- * Strategy: stale-while-revalidate for the app's own files. A launch is served
- * instantly from cache (same speed as offline), and in the background the file
- * is re-fetched from the network and the cache refreshed — so an update pushed
- * to GitHub is picked up silently and shows on the *next* launch, with no manual
- * cache-clearing and no launch-time slowdown.
+ * Strategy: NETWORK-FIRST for the app's own files. When online, every launch
+ * fetches the latest file from GitHub (its CDN is fast) and refreshes the cache,
+ * so an update shows up immediately — no "one launch behind" lag and no manual
+ * cache-clearing. The cache is only a fallback for when the network is slow or
+ * offline, so the app still opens with no connection.
  *
- * This only governs the four static shell files. Every call to Google Apps
- * Script is skipped (POSTs, and anything cross-origin), so saving, loading,
- * renaming and export always go straight to the network, untouched.
+ * This only governs the static shell files. Every call to Google Apps Script is
+ * skipped (POSTs, and anything cross-origin), so saving, loading, and export
+ * always go straight to the network, untouched.
  */
 
-// Bump this string on any change that must invalidate old caches. The activate
-// step deletes every cache that is not the current one.
-const CACHE = 'cash-logger-v2';
+// Bump on any change that must invalidate old caches. The activate step deletes
+// every cache that is not the current one.
+const CACHE = 'cash-logger-v3';
+
+// How long to wait for the network before falling back to the cached copy, so a
+// flaky connection doesn't stall the launch.
+const NETWORK_TIMEOUT_MS = 4000;
 
 const SHELL = [
   './',
@@ -56,25 +60,31 @@ self.addEventListener('fetch', (event) => {
   }
 
   event.respondWith(
-    caches.open(CACHE).then((cache) =>
-      cache.match(request).then((cached) => {
-        // Kick off a background refresh regardless of a cache hit. Only a valid
-        // response replaces the cache, so a transient 404/500 can't poison it.
-        const network = fetch(request)
-          .then((response) => {
-            if (response && response.ok) {
-              cache.put(request, response.clone());
-            }
+    caches.open(CACHE).then((cache) => {
+      // Race the network against a short timer. Whichever settles first wins;
+      // a slow/offline network, or a transient non-OK reply, falls back to cache.
+      const network = fetch(request).then((response) => {
+        if (response && response.ok) {
+          cache.put(request, response.clone());
+          return response;
+        }
+        return null; // treat a non-OK response as a miss
+      });
+
+      const timeout = new Promise((resolve) => {
+        setTimeout(function () { resolve(null); }, NETWORK_TIMEOUT_MS);
+      });
+
+      return Promise.race([network.catch(() => null), timeout])
+        .then((response) => {
+          if (response) {
             return response;
-          })
-          .catch(() => cached || cache.match('./index.html'));
-
-        // Keep the worker alive until the background refresh settles.
-        event.waitUntil(network.catch(() => {}));
-
-        // Serve cache instantly when present; otherwise wait for the network.
-        return cached || network;
-      })
-    )
+          }
+          // Network too slow or failed — serve cache, and let the real fetch
+          // keep going in the background to refresh the cache for next time.
+          event.waitUntil(network.catch(() => {}));
+          return cache.match(request).then((cached) => cached || cache.match('./index.html'));
+        });
+    })
   );
 });
