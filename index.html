@@ -1165,6 +1165,7 @@
     const BATCHES_KEY = 'cashLogger.batches.v2';
     const SELECTED_KEY = 'cashLogger.selectedBatch.v2';
     const RETENTION_KEY = 'cashLogger.retentionDays.v2';
+    const ENTRY_DATES_KEY = 'cashLogger.entryDates.v1';
 
     // A batch stops being offered automatically once it has gone this long
     // without an entry, even if money is left in it.
@@ -1301,7 +1302,7 @@
         return today;
       }
 
-      return batch.lastEnteredDate || batch.startDate || today;
+      return batch.lastEnteredDate || rememberedEntryDate(batch.id) || batch.startDate || today;
     }
 
     const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
@@ -1918,6 +1919,13 @@
     // order they were made — the old code posted the newest entry first and
     // flushed older ones behind it, which scrambled the balance column.
     function enqueue(entry) {
+      // Keep the date cursor independently of the server response. This makes
+      // the next historical entry follow the date just saved even while an
+      // older Apps Script deployment is still returning no lastEnteredDate.
+      if (entry.type === 'disbursement') {
+        rememberEntryDate(entry.batchId, entry.date);
+      }
+
       const queue = readStore(QUEUE_KEY);
       queue.push(entry);
       writeStore(QUEUE_KEY, queue);
@@ -2053,6 +2061,29 @@
       try {
         localStorage.setItem(key, value);
       } catch (err) { /* storage full — the choice just will not persist */ }
+    }
+
+    function readEntryDates() {
+      try {
+        const value = JSON.parse(localStorage.getItem(ENTRY_DATES_KEY));
+        return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+      } catch (err) {
+        return {};
+      }
+    }
+
+    function rememberedEntryDate(batchId) {
+      const date = readEntryDates()[batchId];
+      return /^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) ? date : '';
+    }
+
+    function rememberEntryDate(batchId, date) {
+      if (!batchId || !/^\d{4}-\d{2}-\d{2}$/.test(String(date || ''))) {
+        return;
+      }
+      const dates = readEntryDates();
+      dates[batchId] = date;
+      writeValue(ENTRY_DATES_KEY, JSON.stringify(dates));
     }
 
     function defaultBatchName(isoDate) {
@@ -3807,6 +3838,13 @@
         writeValue(RETENTION_KEY, String(retention));
       }
       if (Array.isArray(list)) {
+        // Refresh the device cursor from a backend that supports logging-order
+        // dates. If an older deployment omits the field, retain the local value.
+        list.forEach(function (batch) {
+          if (batch.lastEnteredDate) {
+            rememberEntryDate(batch.id, batch.lastEnteredDate);
+          }
+        });
         writeStore(BATCHES_KEY, list);
       }
       render();
