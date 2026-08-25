@@ -1283,8 +1283,8 @@
 
     /**
      * The chronologically newest batch follows today. An older batch stays on
-     * its latest entry date (or its opening date when it has no entries yet),
-     * so adding historical entries does not jump forward to the present day.
+     * the date most recently entered into it (or its opening date when it has
+     * no entries yet), so historical entry work can move backward or forward.
      */
     function defaultEntryDate(batch) {
       const today = toLocalISODate(startOfToday());
@@ -1301,7 +1301,7 @@
         return today;
       }
 
-      return batch.lastDate || batch.startDate || today;
+      return batch.lastEnteredDate || batch.startDate || today;
     }
 
     const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
@@ -2112,6 +2112,7 @@
             balance: entry.amount,
             startDate: entry.date,
             lastDate: entry.date,
+            lastEnteredDate: entry.date,
             entries: 0,
             resolvedOn: '',
             pending: true
@@ -2169,6 +2170,7 @@
           batch.spent = round2(batch.spent + entry.amount);
           batch.balance = round2(batch.balance - entry.amount);
           batch.entries += 1;
+          batch.lastEnteredDate = entry.date;
           if (entry.date > batch.lastDate) {
             batch.lastDate = entry.date;
           }
