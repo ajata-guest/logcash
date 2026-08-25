@@ -1281,6 +1281,29 @@
       return year + '-' + month + '-' + day;
     }
 
+    /**
+     * The chronologically newest batch follows today. An older batch stays on
+     * its latest entry date (or its opening date when it has no entries yet),
+     * so adding historical entries does not jump forward to the present day.
+     */
+    function defaultEntryDate(batch) {
+      const today = toLocalISODate(startOfToday());
+      if (!batch) {
+        return today;
+      }
+
+      const newestStartDate = batches.reduce(function (latest, candidate) {
+        const startDate = String(candidate.startDate || '');
+        return startDate > latest ? startDate : latest;
+      }, '');
+
+      if (!newestStartDate || batch.startDate === newestStartDate) {
+        return today;
+      }
+
+      return batch.lastDate || batch.startDate || today;
+    }
+
     const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june',
                     'july', 'august', 'september', 'october', 'november', 'december'];
 
@@ -1656,7 +1679,9 @@
         setStatus('Heard: "' + best.transcript + '"');
 
         openPanel('disbursement', {
-          date: parsed.date,
+          // A clearly spoken date always wins. Otherwise openPanel applies the
+          // date rule for the selected batch.
+          date: parsed.dateRecognized ? parsed.date : '',
           amount: parsed.amount === null ? '' : String(parsed.amount),
           description: parsed.description
         });
@@ -1711,7 +1736,9 @@
           : 'No cash batch selected.';
       }
 
-      els.date.value = values.date || toLocalISODate(startOfToday());
+      els.date.value = values.date || (type === 'batch'
+        ? toLocalISODate(startOfToday())
+        : defaultEntryDate(activeBatch));
       els.amount.value = values.amount || '';
       els.description.value = values.description || '';
       els.name.value = values.name || '';
